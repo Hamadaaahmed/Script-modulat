@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 022
 
-REPO_TARBALL_URL="${HAMADA_REPO_TARBALL_URL:-https://github.com/Hamadaaahmed/commercial-vps-autoscript/archive/refs/heads/main.tar.gz}"
+REPO_TARBALL_URL="${HAMADA_REPO_TARBALL_URL:-https://github.com/Hamadaaahmed/Script-modulat/archive/refs/heads/main.tar.gz}"
 INSTALL_DIR="${HAMADA_DIR:-/root/commercial-vps-autoscript}"
 
 [ "$(id -u)" -eq 0 ] || {

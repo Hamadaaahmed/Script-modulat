@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="${HAMADA_REPO_URL:-https://github.com/Hamadaaahmed/commercial-vps-autoscript.git}"
+REPO_URL="${HAMADA_REPO_URL:-https://github.com/Hamadaaahmed/Script-modulat.git}"
 INSTALL_DIR="${HAMADA_DIR:-/root/commercial-vps-autoscript}"
 REF="${HAMADA_REF:-}"
 
