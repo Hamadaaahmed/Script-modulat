@@ -261,6 +261,12 @@ server {
         proxy_read_timeout 86400;
     }
 
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/html;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+
     location / {
         default_type text/plain;
         return 200 "HAMADA NGINX OK\n";
