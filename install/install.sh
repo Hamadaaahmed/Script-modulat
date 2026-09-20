@@ -1186,6 +1186,11 @@ EOFAUTOMENU
 }
 
 schedule_install_reboot() {
+  if [ "${HAMADA_NO_REBOOT:-0}" = "1" ]; then
+    green "Automatic reboot skipped because HAMADA_NO_REBOOT=1."
+    return 0
+  fi
+
   green "Server will reboot automatically in 10 seconds."
 
   if command -v systemd-run >/dev/null 2>&1; then
