@@ -258,10 +258,8 @@ systemctl enable --now \
 
 sleep 1
 
-systemctl enable \
+systemctl enable --now \
   hamada-udp-custom-firewall.service >/dev/null
-
-/usr/local/sbin/hamada-udp-custom-firewall
 
 log "UDP Custom installed."
 log "Backend : UDP ${CORE_PORT}"
