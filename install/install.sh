@@ -1234,29 +1234,57 @@ clean_previous_install_if_needed() {
 }
 
 main() {
+  local resume_from="${HAMADA_RESUME_FROM_STEP:-1}"
+
   ui_header
   need_root
 
-  clean_previous_install_if_needed
+  case "$resume_from" in
+    1)
+      clean_previous_install_if_needed
 
-  ui_step 1 12 "Domain configuration"
-  detect_domain
+      ui_step 1 12 "Domain configuration"
+      detect_domain
 
-  ui_step 2 12 "System packages"
-  install_packages
+      ui_step 2 12 "System packages"
+      install_packages
 
-  ui_step 3 12 "Network hardening"
-  disable_ipv6
-  install_reset_tool
+      ui_step 3 12 "Network hardening"
+      disable_ipv6
+      install_reset_tool
 
-  ui_step 4 12 "TLS certificates"
-  configure_certs
+      ui_step 4 12 "TLS certificates"
+      configure_certs
 
-  ui_step 5 12 "SSH + OpenVPN + SlowDNS Module"
-  bash "$REPO_DIR/install/modules/ssh/install.sh" "$DOMAIN"
+      ui_step 5 12 "SSH + OpenVPN + SlowDNS Module"
+      bash "$REPO_DIR/install/modules/ssh/install.sh" "$DOMAIN"
 
-  ui_step 6 12 "SSH WebSocket bridge"
-  green "Included in SSH module."
+      ui_step 6 12 "SSH WebSocket bridge"
+      green "Included in SSH module."
+      ;;
+    7)
+      yellow "Resume mode enabled: continuing installation from step 7."
+
+      [ -s /etc/hamada/domain ] || die "Cannot resume: missing /etc/hamada/domain."
+      [ -f /etc/hamada/modules/ssh ] || die "Cannot resume: SSH module marker is missing."
+
+      DOMAIN="$(cat /etc/hamada/domain)"
+      A_DOMAIN="$(cat /etc/hamada/a-domain 2>/dev/null || printf '%s' "$DOMAIN")"
+      SLOWDNS_NS_DOMAIN="$(cat /etc/hamada/slowdns-ns 2>/dev/null || true)"
+      WIREGUARD_DOMAIN="$(cat /etc/hamada/wireguard-domain 2>/dev/null || printf 'wg.%s' "$DOMAIN")"
+
+      systemctl is-active --quiet ssh || die "Cannot resume: SSH service is not active."
+      systemctl is-active --quiet hamada-ssh-ws.service || die "Cannot resume: SSH WebSocket service is not active."
+      systemctl is-active --quiet hamada-udp-custom.service || die "Cannot resume: UDP Custom service is not active."
+      systemctl is-active --quiet hamada-udp-custom-firewall.service || die "Cannot resume: UDP Custom firewall service is not active."
+      systemctl is-active --quiet hamada-slowdns.service || die "Cannot resume: SlowDNS service is not active."
+
+      green "Resume prerequisites verified."
+      ;;
+    *)
+      die "Unsupported HAMADA_RESUME_FROM_STEP=$resume_from. Supported values: 1 or 7."
+      ;;
+  esac
 
   ui_step 7 12 "Nginx and HAProxy"
   configure_nginx
