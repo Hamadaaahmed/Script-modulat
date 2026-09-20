@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE="/etc/hamada/wg-accounts"
+mkdir -p "$BASE"
+
+mapfile -t files < <(find "$BASE" -maxdepth 1 -type f -name '*.conf' | sort)
+
+clear
+echo "============================================"
+echo "       HAMADA NET RENEW WIREGUARD"
+echo "============================================"
+
+if [ "${#files[@]}" -eq 0 ]; then
+  echo "No WireGuard accounts found."
+  echo "============================================"
+  read -rp "Press Enter to continue..."
+  exit 0
+fi
+
+n=1
+for f in "${files[@]}"; do
+  username=""; expire=""; address=""
+  . "$f" || true
+  exp_h="$(date -d "$expire" "+%b %d, %Y" 2>/dev/null || echo "$expire")"
+  printf "[%02d] %-18s | %-12s | %s\n" "$n" "$username" "$exp_h" "$address"
+  n=$((n+1))
+done
+
+echo "============================================"
+read -rp "Select account number to renew: " choice
+[[ "$choice" =~ ^[0-9]+$ ]] || exit 0
+idx=$((choice-1))
+[ "$idx" -ge 0 ] && [ "$idx" -lt "${#files[@]}" ] || exit 0
+
+read -rp "Add days: " days
+[[ "$days" =~ ^[0-9]+$ ]] || exit 0
+
+username=""; private_key=""; public_key=""; address=""; expire=""; domain=""; bug_host=""; endpoint_host=""
+. "${files[$idx]}" || true
+domain="${domain:-$(cat /etc/hamada/domain 2>/dev/null || hostname -I | awk '{print $1}')}"
+bug_host="${bug_host:-}"
+endpoint_host="${endpoint_host:-$domain}"
+
+base_date="$expire"
+if [[ "$base_date" < "$(date +%Y-%m-%d)" ]]; then
+  base_date="$(date +%Y-%m-%d)"
+fi
+
+new_expire="$(date -d "$base_date +${days} days" +%Y-%m-%d)"
+
+cat > "${files[$idx]}" <<EOFC
+username="$username"
+private_key="$private_key"
+public_key="$public_key"
+address="$address"
+expire="$new_expire"
+domain="$domain"
+bug_host="$bug_host"
+endpoint_host="$endpoint_host"
+EOFC
+
+hn-wg-sync
+
+echo "Renewed: $username"
+echo "New Expire: $(date -d "$new_expire" "+%b %d, %Y")"
+read -rp "Press Enter to continue..."

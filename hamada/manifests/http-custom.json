@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "id": "http-custom",
+  "name": "HTTP Custom Proxy",
+  "version": "legacy-observed-1",
+  "description": "Squid CONNECT proxy exposed through legacy edge.",
+  "dependencies": {
+    "modules": [
+      "edge"
+    ],
+    "optional_modules": [],
+    "infrastructure": []
+  },
+  "conflicts": {
+    "modules": [],
+    "notes": []
+  },
+  "requirements": {
+    "packages": [
+      "squid"
+    ],
+    "binaries": [
+      "squid"
+    ],
+    "certificate": false,
+    "edge": true
+  },
+  "paths": {
+    "config": [
+      "/etc/squid/squid.conf"
+    ],
+    "data": [],
+    "legacy": []
+  },
+  "services": [
+    {
+      "name": "squid.service",
+      "ownership": "legacy"
+    }
+  ],
+  "ports": {
+    "public_tcp": [
+      {
+        "port": 3128,
+        "purpose": "HAProxy public proxy"
+      },
+      {
+        "port": 8080,
+        "purpose": "HAProxy public proxy"
+      }
+    ],
+    "public_udp": [],
+    "internal_tcp": [
+      {
+        "port": 13128,
+        "purpose": "Squid internal listener"
+      }
+    ],
+    "internal_udp": []
+  },
+  "firewall": {
+    "ownership": "none",
+    "requirements": []
+  },
+  "edge": {
+    "ownership": "none",
+    "routes": [],
+    "backends": []
+  },
+  "accounts": {
+    "supported": false,
+    "backend": null,
+    "capabilities": []
+  },
+  "healthchecks": [],
+  "lifecycle": [
+    "preflight",
+    "install",
+    "configure",
+    "validate",
+    "enable",
+    "start",
+    "verify",
+    "reconcile",
+    "migrate",
+    "uninstall"
+  ]
+}

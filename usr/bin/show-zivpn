@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ACC_DIR="/etc/hamada/zivpn-accounts"
+DOMAIN="$(cat /etc/hamada/domain 2>/dev/null || hostname -I | awk '{print $1}')"
+mkdir -p "$ACC_DIR"
+
+hn-zivpn-ports >/dev/null 2>&1 || true
+
+mapfile -t files < <(find "$ACC_DIR" -maxdepth 1 -type f -name '*.conf' | sort)
+if [ "${#files[@]}" -eq 0 ]; then
+  echo "No ZIVPN accounts found."
+  read -rp "Press Enter to continue..."
+  exit 0
+fi
+
+clear
+echo "============================================"
+echo "        HAMADA NET ZIVPN ACCOUNTS"
+echo "============================================"
+i=1
+for f in "${files[@]}"; do
+  customer=""
+  username=""
+  password=""
+  port=""
+  expire_date=""
+  source "$f"
+  display_name="${customer:-$username}"
+  printf "[%02d] Name: %s | Password: %s | Port: %s | Expire: %s\n" "$i" "${display_name:-UNKNOWN}" "${password:-UNKNOWN}" "${port:-UNKNOWN}" "${expire_date:-unknown}"
+  i=$((i+1))
+done
+echo "============================================"
+read -rp "Select account number: " n
+[[ "$n" =~ ^[0-9]+$ ]] || exit 1
+idx=$((n-1))
+[ "$idx" -ge 0 ] && [ "$idx" -lt "${#files[@]}" ] || exit 1
+
+customer=""
+username=""
+password=""
+port=""
+expire_date=""
+source "${files[$idx]}"
+display_name="${customer:-$username}"
+
+echo "============================================"
+echo "        HAMADA NET ZIVPN DETAILS"
+echo "============================================"
+echo "Name           : $display_name"
+echo "Password       : $password"
+echo "Host           : $DOMAIN"
+echo "Port           : ${port:-6000}"
+echo "Expire         : $expire_date"
+echo "App            : ZIVPN > UDP"
+echo "============================================"
+read -rp "Press Enter to continue..."

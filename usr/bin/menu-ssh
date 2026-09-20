@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PROJECT_ROOT="${HAMADA_PROJECT_ROOT:-/root/commercial-vps-autoscript}"
+MENU_SCRIPT="$PROJECT_ROOT/install/modules/ssh/menu.sh"
+
+if [ ! -f "$MENU_SCRIPT" ]; then
+  echo "ERROR: SSH module menu not found: $MENU_SCRIPT" >&2
+  exit 1
+fi
+
+exec bash "$MENU_SCRIPT" "$@"

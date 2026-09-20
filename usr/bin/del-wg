@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE="/etc/hamada/wg-accounts"
+WEB="/var/www/html/wg-files"
+mkdir -p "$BASE" "$WEB"
+
+mapfile -t files < <(find "$BASE" -maxdepth 1 -type f -name '*.conf' | sort)
+
+clear
+echo "============================================"
+echo "       HAMADA NET DELETE WIREGUARD"
+echo "============================================"
+
+if [ "${#files[@]}" -eq 0 ]; then
+  echo "No WireGuard accounts found."
+  echo "============================================"
+  read -rp "Press Enter to continue..."
+  exit 0
+fi
+
+n=1
+for f in "${files[@]}"; do
+  username=""; expire=""; address=""
+  . "$f" || true
+  exp_h="$(date -d "$expire" "+%b %d, %Y" 2>/dev/null || echo "$expire")"
+  printf "[%02d] %-18s | %-12s | %s\n" "$n" "$username" "$exp_h" "$address"
+  n=$((n+1))
+done
+
+echo "============================================"
+read -rp "Select account number to delete: " choice
+[[ "$choice" =~ ^[0-9]+$ ]] || exit 0
+idx=$((choice-1))
+[ "$idx" -ge 0 ] && [ "$idx" -lt "${#files[@]}" ] || exit 0
+
+username=""
+. "${files[$idx]}" || true
+echo "Selected account: $username"
+read -rp "Confirm delete by typing y: " confirm
+
+if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+  echo "Cancelled."
+  read -rp "Press Enter to continue..."
+  exit 0
+fi
+
+rm -f "${files[$idx]}" "$WEB/$username.conf" "$WEB/$username.png"
+hn-wg-sync
+
+echo "Deleted: $username"
+read -rp "Press Enter to continue..."

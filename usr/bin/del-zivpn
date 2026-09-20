@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ACC_DIR="/etc/hamada/zivpn-accounts"
+mkdir -p "$ACC_DIR"
+
+mapfile -t files < <(find "$ACC_DIR" -maxdepth 1 -type f -name '*.conf' | sort)
+[ "${#files[@]}" -gt 0 ] || { echo "No ZIVPN accounts found."; exit 0; }
+
+echo "============================================"
+echo "        HAMADA NET DELETE ZIVPN"
+echo "============================================"
+i=1
+for f in "${files[@]}"; do
+  source "$f"
+  printf "[%02d] %s | Expire: %s\n" "$i" "${username:-unknown}" "${expire_date:-unknown}"
+  i=$((i+1))
+done
+echo "============================================"
+read -rp "Select account number: " n
+[[ "$n" =~ ^[0-9]+$ ]] || exit 1
+idx=$((n-1))
+[ "$idx" -ge 0 ] && [ "$idx" -lt "${#files[@]}" ] || exit 1
+
+source "${files[$idx]}"
+read -rp "Delete $username ? type y: " yn
+[ "$yn" = "y" ] || exit 0
+
+rm -f "${files[$idx]}"
+hn-zivpn-sync
+echo "Deleted: $username"

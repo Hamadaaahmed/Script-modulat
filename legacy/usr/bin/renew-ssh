@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BRAND="HAMADA NET"
+STORE="/etc/hamada/ssh-accounts"
+
+get_users() {
+  local file username
+
+  [ -d "$STORE" ] || return 0
+
+  for file in "$STORE"/*.conf; do
+    [ -f "$file" ] || continue
+    username="$(basename "$file" .conf)"
+    id "$username" >/dev/null 2>&1 || continue
+    printf '%s\n' "$username"
+  done | sort
+}
+
+get_expire() {
+  chage -l "$1" 2>/dev/null | awk -F': ' '/Account expires/{print $2}'
+}
+
+days_left() {
+  local exp="$1" today exp_ts today_ts left
+  [ -n "$exp" ] && [ "$exp" != "never" ] || { echo 0; return; }
+  exp_ts="$(date -d "$exp" +%s 2>/dev/null || echo 0)"
+  today_ts="$(date -d "today 00:00:00" +%s)"
+  left=$(( (exp_ts - today_ts) / 86400 ))
+  [ "$left" -gt 0 ] || left=0
+  echo "$left"
+}
+
+mapfile -t USERS < <(get_users)
+
+clear
+echo "============================================"
+echo "          ${BRAND} RENEW SSH ACCOUNT"
+echo "============================================"
+
+if [ "${#USERS[@]}" -eq 0 ]; then
+  echo "No SSH accounts found."
+  echo "============================================"
+  read -rp "Press Enter to continue..."
+  exit 0
+fi
+
+for i in "${!USERS[@]}"; do
+  u="${USERS[$i]}"
+  exp="$(get_expire "$u")"
+  left="$(days_left "$exp")"
+  printf "[%02d] %-16s | Expire: %-12s | Left: %sd\n" \
+    "$((i+1))" "$u" "$exp" "$left"
+done
+
+printf "[00] Back\n"
+echo "============================================"
+read -rp "Select account number: " N
+
+case "$N" in
+  0|00) exit 0 ;;
+esac
+
+echo "$N" | grep -Eq '^[0-9]+$' || { echo "Invalid number"; sleep 1; exit 1; }
+
+idx=$((N-1))
+[ "$idx" -ge 0 ] && [ "$idx" -lt "${#USERS[@]}" ] || { echo "Invalid selection"; sleep 1; exit 1; }
+
+USERNAME="${USERS[$idx]}"
+OLD_EXP="$(get_expire "$USERNAME")"
+LEFT_DAYS="$(days_left "$OLD_EXP")"
+
+echo "Selected      : $USERNAME"
+echo "Current Expiry: $OLD_EXP"
+echo "Days Left     : $LEFT_DAYS"
+
+read -rp "Add days: " DAYS
+echo "$DAYS" | grep -Eq '^[0-9]+$' || { echo "ERROR: days must be number"; exit 1; }
+
+TOTAL_DAYS=$((LEFT_DAYS + DAYS))
+EXP_DATE="$(date -d "+${TOTAL_DAYS} days" +%Y-%m-%d)"
+
+chage -E "$EXP_DATE" "$USERNAME"
+
+mkdir -p "$STORE"
+if [ -f "$STORE/${USERNAME}.conf" ]; then
+  sed -i "s/^EXP_DATE=.*/EXP_DATE='$EXP_DATE'/" "$STORE/${USERNAME}.conf"
+fi
+
+echo "============================================"
+echo "Renewed       : $USERNAME"
+echo "Old Left Days : $LEFT_DAYS"
+echo "Added Days    : $DAYS"
+echo "Total Days    : $TOTAL_DAYS"
+echo "Expired On    : $EXP_DATE"
+echo "============================================"
+read -rp "Press Enter to continue..."

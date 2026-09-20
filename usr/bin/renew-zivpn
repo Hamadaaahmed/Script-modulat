@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ACC_DIR="/etc/hamada/zivpn-accounts"
+mkdir -p "$ACC_DIR"
+
+mapfile -t files < <(find "$ACC_DIR" -maxdepth 1 -type f -name '*.conf' | sort)
+[ "${#files[@]}" -gt 0 ] || { echo "No ZIVPN accounts found."; exit 0; }
+
+echo "============================================"
+echo "        HAMADA NET RENEW ZIVPN"
+echo "============================================"
+i=1
+for f in "${files[@]}"; do
+  source "$f"
+  printf "[%02d] %s | Expire: %s\n" "$i" "${username:-unknown}" "${expire_date:-unknown}"
+  i=$((i+1))
+done
+echo "============================================"
+read -rp "Select account number: " n
+[[ "$n" =~ ^[0-9]+$ ]] || exit 1
+idx=$((n-1))
+[ "$idx" -ge 0 ] && [ "$idx" -lt "${#files[@]}" ] || exit 1
+
+source "${files[$idx]}"
+read -rp "Add days: " days
+days="${days:-30}"
+echo "$days" | grep -Eq '^[0-9]+$' || { echo "ERROR: invalid days"; exit 1; }
+
+base="$(date +%s)"
+if [ "${expire_epoch:-0}" -gt "$base" ] 2>/dev/null; then
+  base="$expire_epoch"
+fi
+
+new_epoch=$((base + days*86400))
+new_date="$(date -d "@$new_epoch" "+%Y-%m-%d")"
+
+sed -i "s/^expire_epoch=.*/expire_epoch=\"$new_epoch\"/" "${files[$idx]}"
+sed -i "s/^expire_date=.*/expire_date=\"$new_date\"/" "${files[$idx]}"
+
+hn-zivpn-sync
+echo "Renewed $username to $new_date"

@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "id": "l2tp",
+  "name": "L2TP/IPSec",
+  "version": "legacy-observed-1",
+  "description": "Legacy L2TP/IPSec, IKEv1 and IKEv2 runtime.",
+  "dependencies": {
+    "modules": [],
+    "optional_modules": [],
+    "infrastructure": []
+  },
+  "conflicts": {
+    "modules": [],
+    "notes": []
+  },
+  "requirements": {
+    "packages": [
+      "strongswan",
+      "xl2tpd"
+    ],
+    "binaries": [
+      "ipsec",
+      "xl2tpd"
+    ],
+    "certificate": false,
+    "edge": false
+  },
+  "paths": {
+    "config": [
+      "/etc/ipsec.conf",
+      "/etc/xl2tpd/xl2tpd.conf"
+    ],
+    "data": [
+      "/etc/hamada/l2tp"
+    ],
+    "legacy": []
+  },
+  "services": [
+    {
+      "name": "strongswan-starter.service",
+      "ownership": "legacy"
+    },
+    {
+      "name": "xl2tpd.service",
+      "ownership": "legacy"
+    },
+    {
+      "name": "hamada-l2tp-firewall.service",
+      "ownership": "legacy"
+    }
+  ],
+  "ports": {
+    "public_tcp": [],
+    "public_udp": [
+      {
+        "port": 500,
+        "purpose": "IPSec IKE"
+      },
+      {
+        "port": 1701,
+        "purpose": "L2TP"
+      },
+      {
+        "port": 4500,
+        "purpose": "IPSec NAT-T"
+      }
+    ],
+    "internal_tcp": [],
+    "internal_udp": []
+  },
+  "firewall": {
+    "ownership": "legacy",
+    "requirements": [
+      "Legacy L2TP/IPSec INPUT/FORWARD/NAT rules"
+    ]
+  },
+  "edge": {
+    "ownership": "none",
+    "routes": [],
+    "backends": []
+  },
+  "accounts": {
+    "supported": true,
+    "backend": "legacy L2TP config files",
+    "capabilities": [
+      "account_create",
+      "account_delete",
+      "account_renew",
+      "account_expire",
+      "account_list",
+      "account_status",
+      "account_reconcile"
+    ]
+  },
+  "healthchecks": [],
+  "lifecycle": [
+    "preflight",
+    "install",
+    "configure",
+    "validate",
+    "enable",
+    "start",
+    "verify",
+    "reconcile",
+    "migrate",
+    "uninstall"
+  ]
+}

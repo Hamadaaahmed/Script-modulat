@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE="/etc/hamada/l2tp-accounts"
+DOMAIN="$(cat /etc/hamada/domain 2>/dev/null || hostname -I | awk '{print $1}')"
+PSK="$(cat /etc/hamada/l2tp-ipsec.psk 2>/dev/null || echo HAMADA-NET-PSK)"
+mkdir -p "$BASE"
+
+clear
+echo "============================================"
+echo "        HAMADA NET CREATE L2TP ACCOUNT"
+echo "============================================"
+read -rp "Username : " username
+read -rp "Password : " password
+read -rp "Expired days : " days
+
+if [[ ! "$username" =~ ^[a-zA-Z0-9._-]+$ ]]; then echo "Invalid username"; exit 1; fi
+if [ -z "$password" ]; then echo "Password required"; exit 1; fi
+if [[ ! "$days" =~ ^[0-9]+$ ]]; then echo "Invalid days"; exit 1; fi
+
+expire="$(date -d "+${days} days" +%Y-%m-%d)"
+expire_human="$(date -d "$expire" "+%b %d, %Y")"
+
+cat > "$BASE/$username.conf" <<EOFC
+username="$username"
+password="$password"
+expire="$expire"
+domain="$DOMAIN"
+EOFC
+chmod 600 "$BASE/$username.conf"
+
+hn-l2tp-sync
+
+clear
+echo "============================================"
+echo "      HAMADA NET VPN ACCOUNT CREATED"
+echo "============================================"
+echo "Username       : $username"
+echo "Password       : $password"
+echo "Expired On     : $expire_human"
+echo "Host           : $DOMAIN"
+echo "============================================"
+echo "ANDROID - IKEv2/IPSec MSCHAPv2"
+echo "Protocol       : IKEv2/IPSec MSCHAPv2"
+echo "Server         : $DOMAIN"
+echo "Remote ID      : $DOMAIN"
+echo "Local ID       : leave blank"
+echo "Username       : $username"
+echo "Password       : $password"
+echo "CA Certificate : http://$DOMAIN/hamada-ca.crt"
+echo "Note           : Install CA certificate if Android asks for it."
+echo "============================================"
+echo "ROUTER - L2TP/IPSec PSK"
+echo "Protocol       : L2TP/IPSec PSK"
+echo "Server         : $DOMAIN"
+echo "IPSec PSK      : $PSK"
+echo "L2TP Secret    : leave blank"
+echo "Username       : $username"
+echo "Password       : $password"
+echo "============================================"
+echo "ANDROID LEGACY - L2TP/IPSec PSK"
+echo "Protocol       : L2TP/IPSec PSK"
+echo "Server         : $DOMAIN"
+echo "IPSec PSK      : $PSK"
+echo "Username       : $username"
+echo "Password       : $password"
+echo "============================================"
+read -rp "Press Enter to continue..."

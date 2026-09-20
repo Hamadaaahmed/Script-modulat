@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+set -u
+
+ok="[OK]"
+bad="[DOWN]"
+
+service_status() {
+  local name="$1"
+  local label="$2"
+  if systemctl is-active --quiet "$name" 2>/dev/null; then
+    printf "%-34s %s\n" "$label" "$ok"
+  else
+    printf "%-34s %s\n" "$label" "$bad"
+  fi
+}
+
+tcp_status() {
+  local port="$1"
+  local label="$2"
+  if ss -H -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)$port$"; then
+    printf "%-34s %s\n" "$label TCP:$port" "$ok"
+  else
+    printf "%-34s %s\n" "$label TCP:$port" "$bad"
+  fi
+}
+
+udp_status() {
+  local port="$1"
+  local label="$2"
+  if ss -H -lun 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)$port$"; then
+    printf "%-34s %s\n" "$label UDP:$port" "$ok"
+  else
+    printf "%-34s %s\n" "$label UDP:$port" "$bad"
+  fi
+}
+
+clear
+echo "============================================"
+echo "          HAMADA NET SERVICE STATUS"
+echo "============================================"
+
+echo "Core Services:"
+service_status ssh "OpenSSH Service"
+service_status dropbear "Dropbear Service"
+service_status nginx "Nginx Service"
+service_status haproxy "HAProxy Service"
+service_status stunnel4 "Stunnel Service"
+service_status squid "Squid Service"
+echo "--------------------------------------------"
+
+echo "SSH / WS / Proxy Ports:"
+tcp_status 22 "OpenSSH"
+tcp_status 109 "Dropbear"
+tcp_status 143 "Dropbear"
+tcp_status 80 "Nginx HTTP"
+tcp_status 443 "HAProxy TLS"
+tcp_status 444 "Stunnel SSH"
+tcp_status 777 "Stunnel Dropbear"
+tcp_status 3128 "Squid"
+tcp_status 8080 "Squid"
+tcp_status 10080 "SSH WS Bridge"
+tcp_status 10081 "Dropbear WS Bridge"
+echo "--------------------------------------------"
+
+echo "OpenVPN:"
+service_status openvpn-server@server-tcp-1194 "OpenVPN TCP Service"
+service_status openvpn-server@server-udp-2200 "OpenVPN UDP Service"
+service_status hamada-openvpn-ws "OpenVPN WS Bridge"
+tcp_status 1194 "OpenVPN TCP"
+udp_status 2200 "OpenVPN UDP"
+tcp_status 10082 "OpenVPN WS Bridge"
+echo "--------------------------------------------"
+
+echo "L2TP / IKEv2:"
+service_status strongswan-starter "StrongSwan IKEv2/IPSec"
+service_status xl2tpd "XL2TPD L2TP"
+service_status hamada-l2tp-firewall "L2TP Firewall Rules"
+udp_status 500 "IPSec IKE"
+udp_status 4500 "IPSec NAT-T"
+udp_status 1701 "L2TP"
+echo "--------------------------------------------"
+
+echo "WireGuard:"
+service_status wg-quick@wg0 "WireGuard Service"
+udp_status 51820 "WireGuard"
+echo "--------------------------------------------"
+
+echo "ZIVPN UDP:"
+service_status zivpn "ZIVPN UDP Service"
+service_status hamada-zivpn-firewall "ZIVPN Firewall Service"
+udp_status 5667 "ZIVPN UDP"
+echo "ZIVPN public UDP range: 6000-19999 DNAT -> 5667"
+
+echo "--------------------------------------------"
+
+echo "Xray:"
+service_status xray "Xray Service"
+service_status hamada-xray-firewall "Xray Firewall Service"
+echo "Xray public TCP entry: 80/443 via HAProxy/Nginx"
+echo "Xray internal ports are opened only when accounts exist."
+echo "--------------------------------------------"
+
+echo "NoobzVPN:"
+service_status noobzvpns "NoobzVPN Service"
+tcp_status 80 "NoobzVPN TCP"
+tcp_status 443 "NoobzVPN TLS"
+
+domain="$(cat /etc/hamada/domain 2>/dev/null || echo unknown)"
+echo "Domain: $domain"
+echo "============================================"
+if [ -t 0 ] && [ "${HAMADA_STATUS_NO_PAUSE:-0}" != "1" ]; then
+  read -rp "Press Enter to continue..."
+fi

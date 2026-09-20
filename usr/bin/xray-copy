@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+user="${1:-}"
+
+if [ -z "$user" ]; then
+  echo "Usage: xray-copy USER"
+  exit 1
+fi
+
+safe="$(printf '%s' "$user" | tr -c 'A-Za-z0-9_.-' '_')"
+file="/root/xray-copy/${safe}.txt"
+
+if [ ! -f "$file" ]; then
+  echo "Copy file not found: $file"
+  echo "Run: xrayctl show $user"
+  exit 1
+fi
+
+if [ -t 1 ]; then
+  printf '\033[H\033[2J\033[3J'
+fi
+
+cat "$file"
+
+if command -v base64 >/dev/null 2>&1 && [ -t 1 ]; then
+  b64="$(base64 -w 0 "$file" 2>/dev/null || base64 "$file" | tr -d '\n')"
+  printf '\033]52;c;%s\a' "$b64"
+fi
+
+if [ -t 0 ]; then
+  read -r
+fi
+
+if [ -t 1 ]; then
+  printf ''
+fi

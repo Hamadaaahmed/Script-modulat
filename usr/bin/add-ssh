@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BRAND="HAMADA NET"
+DOMAIN="$(cat /etc/hamada/domain 2>/dev/null || true)"
+[ -n "$DOMAIN" ] || DOMAIN="$(hostname -I | awk '{print $1}')"
+STORE="/etc/hamada/ssh-accounts"
+WEBROOT="/var/www/html/payloads"
+mkdir -p "$STORE" "$WEBROOT"
+
+create_payload_files() {
+  local u="$1"
+  local dir="$STORE/$u"
+  local webdir="$WEBROOT/$u"
+
+  mkdir -p "$dir" "$webdir"
+
+  cat > "$dir/ssh ws.txt" <<EOF
+GET / HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET /ssh HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET /ws HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET / HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: Websocket[crlf]Connection: Keep-Alive[crlf]Upgrade: websocket[crlf][crlf]
+GET /ssh HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: Websocket[crlf]Connection: Keep-Alive[crlf]Upgrade: websocket[crlf][crlf]
+GET /ws HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: Websocket[crlf]Connection: Keep-Alive[crlf]Upgrade: websocket[crlf][crlf]
+POST / HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+POST /ssh HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET / HTTP/1.1[crlf]Host: ${DOMAIN}:80[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET /ssh HTTP/1.1[crlf]Host: ${DOMAIN}:80[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET / HTTP/1.1[crlf]Host: ${DOMAIN}:443[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET /ssh HTTP/1.1[crlf]Host: ${DOMAIN}:443[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET /ssh HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET / HTTP/1.1[crlf]Host: [host_port][crlf]Upgrade: websocket[crlf]Connection: Keep-Alive[crlf]Upgrade: websocket[crlf][crlf]
+GET /ssh HTTP/1.1[crlf]Host: [host_port][crlf]Upgrade: websocket[crlf]Connection: Keep-Alive[crlf]Upgrade: websocket[crlf][crlf]
+POST / HTTP/1.1[crlf]Host: [host][crlf][crlf]GET / HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+POST / HTTP/1.1[crlf]Host: [host][crlf][crlf]GET /ssh HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+CONNECT ${DOMAIN}:80 HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+CONNECT ${DOMAIN}:443 HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+EOF
+
+  cat > "$dir/ovpn ws.txt" <<EOF
+GET /openvpn HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET /ovpn HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET /vpn HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET /openvpn HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: Websocket[crlf]Connection: Keep-Alive[crlf]Upgrade: websocket[crlf][crlf]
+GET /ovpn HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: Websocket[crlf]Connection: Keep-Alive[crlf]Upgrade: websocket[crlf][crlf]
+GET /vpn HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: Websocket[crlf]Connection: Keep-Alive[crlf]Upgrade: websocket[crlf][crlf]
+POST /openvpn HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+POST /ovpn HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+POST /vpn HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET /openvpn HTTP/1.1[crlf]Host: ${DOMAIN}:80[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET /ovpn HTTP/1.1[crlf]Host: ${DOMAIN}:80[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET /vpn HTTP/1.1[crlf]Host: ${DOMAIN}:80[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET /openvpn HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET /ovpn HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+GET /vpn HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+POST / HTTP/1.1[crlf]Host: verify.monzo.com[crlf][crlf]CF-RAY /openvpn HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection: Keep-Alive[crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]
+POST / HTTP/1.1[crlf]Host: verify.monzo.com[crlf][crlf]CF-RAY /ovpn HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection: Keep-Alive[crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]
+POST / HTTP/1.1[crlf]Host: verify.monzo.com[crlf][crlf]CF-RAY /vpn HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection: Keep-Alive[crlf]User-Agent: [ua][crlf]Upgrade: websocket[crlf][crlf]
+CONNECT ${DOMAIN}:80 HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+CONNECT ${DOMAIN}:443 HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]
+EOF
+
+  cp -f "$dir/ssh ws.txt" "$webdir/ssh-ws.txt"
+  cp -f "$dir/ovpn ws.txt" "$webdir/ovpn-ws.txt"
+  chmod 600 "$dir/"*.txt
+  chmod 644 "$webdir/"*.txt
+}
+
+
+slowdns_account_block() {
+  local slowdns_domain ns_host public_key
+
+  echo "--------------------------------------------"
+  echo "SLOWDNS"
+
+  if [ ! -s /etc/hamada/slowdns/server.pub ]; then
+    echo "Status         : Not configured"
+    return
+  fi
+
+  slowdns_domain="$(
+    cat /etc/hamada/slowdns-domain 2>/dev/null ||
+    echo "ns-${DOMAIN%%.*}.${DOMAIN#*.}"
+  )"
+
+  ns_host="$(
+    cat /etc/hamada/slowdns-ns-host 2>/dev/null ||
+    echo "$DOMAIN"
+  )"
+
+  public_key="$(
+    tr -d '\r\n ' < /etc/hamada/slowdns/server.pub
+  )"
+
+  echo "Status         : Enabled"
+  echo "Tunnel Domain  : $slowdns_domain"
+  echo "NS Host        : $ns_host"
+  echo "Public Key     : $public_key"
+  echo "DNS            : 8.8.8.8 / 1.1.1.1"
+  echo "Public Ports   : 53, 80, 443"
+  echo "Mode           : SSH ON / V2Ray OFF"
+}
+
+print_account() {
+  local u="$1" p="$2" exp="$3"
+  echo "============================================"
+  echo "          ${BRAND} SSH ACCOUNT"
+  echo "============================================"
+  echo "Username       : $u"
+  echo "Password       : $p"
+  echo "Expired On     : $exp"
+  echo "Host           : $DOMAIN"
+  echo "IP             : $(cat /etc/hamada/server-ip 2>/dev/null || hostname -I | awk '{print $1}')"
+  echo "OpenSSH        : 22"
+  echo "Dropbear       : 109, 143"
+  echo "SSH WS         : 80 path / or /ssh or /ws"
+  echo "SSH WS TLS     : 443 path / or /ssh or /ws"
+  echo "Dropbear WS    : 80/443 path /dropbear or /db"
+  echo "Dropbear TLS   : 444, 777"
+  echo "Squid Proxy    : 3128, 8080"
+  echo "OpenVPN TCP    : http://${DOMAIN}/vpn-files/client-tcp-1194.ovpn"
+  echo "OpenVPN UDP    : http://${DOMAIN}/vpn-files/client-udp-2200.ovpn"
+  echo "OpenVPN WS 443 : http://${DOMAIN}/vpn-files/ws%20443.ovpn"
+  echo "OpenVPN WS 80  : http://${DOMAIN}/vpn-files/ws%2080.ovpn"
+  echo "SSH Payloads   : http://${DOMAIN}/payloads/${u}/ssh-ws.txt"
+  echo "OVPN Payloads  : http://${DOMAIN}/payloads/${u}/ovpn-ws.txt"
+  echo "UDP Custom     : Enabled"
+  echo "UDP Host       : ${DOMAIN}"
+  echo "UDP Ports      : 1-65535"
+  echo "UDP Excluded   : 53,68,500,1701,2200,4500,5667,6000-19999,10994,36712,51820"
+  echo "UDP Username   : $u"
+  echo "UDP Password   : $p"
+  slowdns_account_block
+  echo "============================================"
+  echo "SSH WebSocket Payload:"
+  echo "GET / HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]"
+  echo "============================================"
+  echo "OpenVPN WebSocket Payload:"
+  echo "GET /openvpn HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]"
+  echo "============================================"
+  echo "Dropbear Squid CONNECT Payload:"
+  echo "CONNECT ${DOMAIN}:109 HTTP/1.1[crlf]Host: ${DOMAIN}:109[crlf][crlf]"
+  echo ""
+  echo "Dropbear Squid GET Payload:"
+  echo "GET http://${DOMAIN}:109/ HTTP/1.1[crlf]Host: ${DOMAIN}:109[crlf]Proxy-Connection: keep-alive[crlf]Connection: keep-alive[crlf][crlf]"
+  echo "============================================"
+}
+
+clear
+echo "============================================"
+echo "          ${BRAND} CREATE SSH ACCOUNT"
+echo "============================================"
+read -rp "Username : " USERNAME
+read -rp "Password : " PASSWORD
+read -rp "Expired days : " DAYS
+
+[ -n "$USERNAME" ] && [ -n "$PASSWORD" ] && [ -n "$DAYS" ] || { echo "ERROR: all fields are required"; exit 1; }
+echo "$DAYS" | grep -Eq '^[0-9]+$' || { echo "ERROR: days must be number"; exit 1; }
+
+if id "$USERNAME" >/dev/null 2>&1; then
+  echo "ERROR: user already exists: $USERNAME"
+  exit 1
+fi
+
+EXP_DATE="$(date -d "+${DAYS} days" +%Y-%m-%d)"
+
+useradd -M -s /bin/bash "$USERNAME"
+echo "${USERNAME}:${PASSWORD}" | chpasswd
+chage -E "$EXP_DATE" "$USERNAME"
+
+cat > "$STORE/${USERNAME}.conf" <<DATA
+USERNAME='$USERNAME'
+PASSWORD='$PASSWORD'
+EXP_DATE='$EXP_DATE'
+DOMAIN='$DOMAIN'
+DATA
+chmod 600 "$STORE/${USERNAME}.conf"
+
+create_payload_files "$USERNAME"
+print_account "$USERNAME" "$PASSWORD" "$EXP_DATE"
+read -rp "Press Enter to continue..."

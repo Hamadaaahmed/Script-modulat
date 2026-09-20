@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+command -v hamada-wg-web-fix >/dev/null 2>&1 && hamada-wg-web-fix || true
+set -euo pipefail
+
+BASE="/etc/hamada/wg-accounts"
+WEB="/var/www/html/wg-files"
+DOMAIN="$(cat /etc/hamada/domain 2>/dev/null || hostname -I | awk '{print $1}')"
+SERVER_PRIVATE="/etc/hamada/wg-server-private.key"
+IFACE="$(cat /etc/hamada/wg-interface 2>/dev/null || echo eth0)"
+TODAY="$(date +%Y-%m-%d)"
+
+mkdir -p "$BASE" "$WEB" /etc/wireguard
+chmod -R a+rX /var/www/html/wg-files 2>/dev/null || true
+
+cat > /etc/wireguard/wg0.conf <<EOFWG
+[Interface]
+Address = 10.30.0.1/24
+ListenPort = 51820
+PrivateKey = $(cat "$SERVER_PRIVATE")
+PostUp = iptables -t nat -A POSTROUTING -s 10.30.0.0/24 -o $IFACE -j MASQUERADE
+PostDown = iptables -t nat -D POSTROUTING -s 10.30.0.0/24 -o $IFACE -j MASQUERADE
+SaveConfig = false
+EOFWG
+
+for f in "$BASE"/*.conf; do
+  [ -f "$f" ] || continue
+  username=""
+  private_key=""
+  public_key=""
+  address=""
+  expire=""
+  . "$f" || true
+
+  [ -n "${username:-}" ] || continue
+  [ -n "${public_key:-}" ] || continue
+  [ -n "${address:-}" ] || continue
+  [ -n "${expire:-}" ] || continue
+
+  if [[ "$expire" < "$TODAY" ]]; then
+    continue
+  fi
+
+  cat >> /etc/wireguard/wg0.conf <<EOFWG
+
+[Peer]
+# $username | expire $expire
+PublicKey = $public_key
+AllowedIPs = $address/32
+EOFWG
+done
+
+chmod 600 /etc/wireguard/wg0.conf
+
+systemctl enable wg-quick@wg0 >/dev/null 2>&1 || true
+if systemctl is-active --quiet wg-quick@wg0; then
+  wg syncconf wg0 <(wg-quick strip wg0) >/dev/null 2>&1 || true
+else
+  systemctl start wg-quick@wg0 >/dev/null 2>&1 || true
+fi

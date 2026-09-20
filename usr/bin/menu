@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -t 1 ]; then
+  RED="$(printf '\033[31m')"
+  GREEN="$(printf '\033[32m')"
+  YELLOW="$(printf '\033[33m')"
+  BLUE="$(printf '\033[34m')"
+  MAGENTA="$(printf '\033[35m')"
+  CYAN="$(printf '\033[36m')"
+  WHITE="$(printf '\033[37m')"
+  BOLD="$(printf '\033[1m')"
+  DIM="$(printf '\033[2m')"
+  RESET="$(printf '\033[0m')"
+else
+  RED=""; GREEN=""; YELLOW=""; BLUE=""; MAGENTA=""; CYAN=""; WHITE=""; BOLD=""; DIM=""; RESET=""
+fi
+
+DOMAIN="$(cat /etc/hamada/domain 2>/dev/null || hostname -f 2>/dev/null || hostname)"
+LINE="======================================================"
+
+line() {
+  printf "%b%s%b\n" "$DIM" "$LINE" "$RESET"
+}
+
+service_dot() {
+  local service="$1"
+  local label="$2"
+
+  if systemctl is-active --quiet "$service" 2>/dev/null; then
+    printf "%b●%b %s" "$GREEN" "$RESET" "$label"
+  else
+    printf "%b●%b %s" "$RED" "$RESET" "$label"
+  fi
+}
+
+
+update_dot() {
+  printf '●'
+}
+
+pause_menu() {
+  echo
+  read -rp "Press Enter to continue..." _
+}
+
+show_header() {
+  clear
+  line
+  printf "%b%*s%b\n" "$BOLD$CYAN" 39 "HAMADA NET VIP VPN MANAGER" "$RESET"
+  printf "%b%*s%b\n" "$YELLOW" 42 "Premium Multi-Protocol VPN Panel" "$RESET"
+  line
+
+  printf "%bDomain:%b %s\n" "$BOLD" "$RESET" "$DOMAIN"
+  printf "%bStatus:%b " "$BOLD" "$RESET"
+  service_dot nginx "WEB"
+  printf "  "
+  service_dot haproxy "TLS"
+  printf "  "
+  service_dot xray "XRAY"
+  printf "  "
+  service_dot wg-quick@wg0 "WG"
+  printf "\n"
+
+  line
+  printf "%b%b\n" "$GREEN" "$RESET"
+  line
+}
+
+menu_item() {
+  local num="$1"
+  local title="$2"
+  local desc="$3"
+
+  printf "%b[%s]%b %-30s %b%s%b\n" "$BOLD$CYAN" "$num" "$RESET" "$title" "$DIM" "$desc" "$RESET"
+}
+
+while true; do
+  show_header
+
+  printf "%bACCOUNT SERVICES%b\n" "$BOLD$MAGENTA" "$RESET"
+  menu_item "1" "SSH / OpenVPN / Dropbear / WS" ""
+  menu_item "2" "L2TP/IPSec / IKEv2" ""
+  menu_item "3" "WireGuard" ""
+  menu_item "4" "ZIVPN UDP" ""
+  echo
+
+  printf "%bXRAY 80/443 SERVICES%b\n" "$BOLD$MAGENTA" "$RESET"
+  menu_item "5" "Xray Manager" ""
+    menu_item "6" "Psiphon Server" ""
+  menu_item "7" "NoobzVPN Server" ""
+  echo
+
+  printf "%bSYSTEM TOOLS%b\n" "$BOLD$MAGENTA" "$RESET"
+  menu_item "8" "$(update_dot) Hamada-Update" ""
+  menu_item "9" "Settings" ""
+  menu_item "0" "Exit" ""
+
+  line
+  printf "%b%b\n" "$YELLOW" "$RESET"
+  line
+
+  read -rp "Select Menu : " opt
+
+  case "$opt" in
+    1) menu-ssh ;;
+    2) menu-l2tp ;;
+    3) menu-wg ;;
+    4) menu-zivpn ;;
+    5) xray-menu ;;
+    6) menu-psiphon ;;
+    7) menu-noobz ;;
+    8) hamada-update ; pause_menu ;;
+    9) menu-settings ;;
+    0) clear; exit 0 ;;
+    *) echo "Invalid option"; sleep 1 ;;
+  esac
+done

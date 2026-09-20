@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "id": "psiphon",
+  "name": "Psiphon Server",
+  "version": "legacy-observed-1",
+  "description": "Legacy Psiphon protocol server.",
+  "dependencies": {
+    "modules": [],
+    "optional_modules": [],
+    "infrastructure": []
+  },
+  "conflicts": {
+    "modules": [],
+    "notes": []
+  },
+  "requirements": {
+    "packages": [],
+    "binaries": [
+      "psiphond"
+    ],
+    "certificate": false,
+    "edge": false
+  },
+  "paths": {
+    "config": [],
+    "data": [],
+    "legacy": []
+  },
+  "services": [
+    {
+      "name": "hamada-psiphon.service",
+      "ownership": "legacy"
+    }
+  ],
+  "ports": {
+    "public_tcp": [
+      {
+        "port": 10990,
+        "purpose": "Psiphon SSH"
+      },
+      {
+        "port": 10991,
+        "purpose": "Psiphon OSSH"
+      },
+      {
+        "port": 10992,
+        "purpose": "Unfronted Meek OSSH"
+      },
+      {
+        "port": 10993,
+        "purpose": "HTTPS Meek"
+      }
+    ],
+    "public_udp": [
+      {
+        "port": 10994,
+        "purpose": "QUIC-OSSH"
+      }
+    ],
+    "internal_tcp": [],
+    "internal_udp": []
+  },
+  "firewall": {
+    "ownership": "none",
+    "requirements": []
+  },
+  "edge": {
+    "ownership": "none",
+    "routes": [],
+    "backends": []
+  },
+  "accounts": {
+    "supported": false,
+    "backend": null,
+    "capabilities": []
+  },
+  "healthchecks": [],
+  "lifecycle": [
+    "preflight",
+    "install",
+    "configure",
+    "validate",
+    "enable",
+    "start",
+    "verify",
+    "reconcile",
+    "migrate",
+    "uninstall"
+  ]
+}

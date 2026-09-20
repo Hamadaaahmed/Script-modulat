@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "id": "slowdns",
+  "name": "SlowDNS",
+  "version": "legacy-observed-1",
+  "description": "DNSTT/SlowDNS tunnel and mux.",
+  "dependencies": {
+    "modules": [
+      "ssh"
+    ],
+    "optional_modules": [
+      "xray"
+    ],
+    "infrastructure": []
+  },
+  "conflicts": {
+    "modules": [],
+    "notes": []
+  },
+  "requirements": {
+    "packages": [],
+    "binaries": [
+      "dnstt-server"
+    ],
+    "certificate": false,
+    "edge": false
+  },
+  "paths": {
+    "config": [
+      "/etc/hamada/slowdns-domain",
+      "/etc/hamada/slowdns-ns-host"
+    ],
+    "data": [],
+    "legacy": []
+  },
+  "services": [
+    {
+      "name": "hamada-slowdns.service",
+      "ownership": "legacy"
+    },
+    {
+      "name": "hamada-slowdns-mux.service",
+      "ownership": "legacy"
+    }
+  ],
+  "ports": {
+    "public_tcp": [],
+    "public_udp": [
+      {
+        "port": 53,
+        "purpose": "DNSTT DNS tunnel"
+      }
+    ],
+    "internal_tcp": [
+      {
+        "port": 53001,
+        "purpose": "SlowDNS mux"
+      }
+    ],
+    "internal_udp": []
+  },
+  "firewall": {
+    "ownership": "legacy",
+    "requirements": [
+      "Legacy SlowDNS UDP/53 INPUT rules"
+    ]
+  },
+  "edge": {
+    "ownership": "none",
+    "routes": [],
+    "backends": []
+  },
+  "accounts": {
+    "supported": false,
+    "backend": null,
+    "capabilities": []
+  },
+  "healthchecks": [],
+  "lifecycle": [
+    "preflight",
+    "install",
+    "configure",
+    "validate",
+    "enable",
+    "start",
+    "verify",
+    "reconcile",
+    "migrate",
+    "uninstall"
+  ]
+}

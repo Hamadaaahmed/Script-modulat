@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ACC_DIR="/etc/hamada/ssh-accounts"
+
+clear
+echo "============================================"
+echo "        HAMADA NET ACTIVE SSH LOGINS"
+echo "============================================"
+
+[ -d "$ACC_DIR" ] || { echo "No SSH accounts found."; read -rp "Press Enter to continue..."; exit 0; }
+
+online_count=0
+i=1
+
+for f in "$ACC_DIR"/*.conf; do
+  [ -f "$f" ] || continue
+
+  username="$(basename "$f" .conf)"
+  password="UNKNOWN"
+
+  if grep -qi '^USERNAME=' "$f"; then
+    username="$(grep -i '^USERNAME=' "$f" | head -n1 | cut -d= -f2- | tr -d "'\"")"
+  fi
+
+  if grep -qi '^PASSWORD=' "$f"; then
+    password="$(grep -i '^PASSWORD=' "$f" | head -n1 | cut -d= -f2- | tr -d "'\"")"
+  fi
+
+  id "$username" >/dev/null 2>&1 || continue
+
+  pids="$(pgrep -u "$username" 2>/dev/null || true)"
+  [ -n "$pids" ] || continue
+
+  conn=0
+  for pid in $pids; do
+    if ss -ntp 2>/dev/null | grep -q "pid=$pid,"; then
+      conn=$((conn+1))
+    fi
+  done
+
+  [ "$conn" -gt 0 ] || continue
+
+  printf "[%02d] %s | %s | Online:%s\n" "$i" "$username" "$password" "$conn"
+
+  i=$((i+1))
+  online_count=$((online_count+1))
+done
+
+[ "$online_count" -gt 0 ] || echo "No active SSH clients now."
+
+echo "============================================"
+echo "Online accounts: $online_count"
+echo "============================================"
+read -rp "Press Enter to continue..."

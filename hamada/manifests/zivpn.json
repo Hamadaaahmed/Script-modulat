@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "id": "zivpn",
+  "name": "ZiVPN UDP",
+  "version": "legacy-observed-1",
+  "description": "Legacy ZiVPN UDP backend and public DNAT range.",
+  "dependencies": {
+    "modules": [],
+    "optional_modules": [],
+    "infrastructure": []
+  },
+  "conflicts": {
+    "modules": [],
+    "notes": []
+  },
+  "requirements": {
+    "packages": [],
+    "binaries": [
+      "zivpn"
+    ],
+    "certificate": false,
+    "edge": false
+  },
+  "paths": {
+    "config": [],
+    "data": [
+      "/etc/hamada/zivpn"
+    ],
+    "legacy": []
+  },
+  "services": [
+    {
+      "name": "zivpn.service",
+      "ownership": "legacy"
+    },
+    {
+      "name": "hamada-zivpn-firewall.service",
+      "ownership": "legacy"
+    }
+  ],
+  "ports": {
+    "public_tcp": [],
+    "public_udp": [
+      {
+        "start": 6000,
+        "end": 19999,
+        "purpose": "ZiVPN public UDP DNAT range"
+      }
+    ],
+    "internal_tcp": [],
+    "internal_udp": [
+      {
+        "port": 5667,
+        "purpose": "ZiVPN backend"
+      }
+    ]
+  },
+  "firewall": {
+    "ownership": "legacy",
+    "requirements": [
+      "Legacy ZiVPN DNAT/firewall ownership"
+    ]
+  },
+  "edge": {
+    "ownership": "none",
+    "routes": [],
+    "backends": []
+  },
+  "accounts": {
+    "supported": true,
+    "backend": "legacy ZiVPN config files",
+    "capabilities": [
+      "account_create",
+      "account_delete",
+      "account_renew",
+      "account_expire",
+      "account_list",
+      "account_status",
+      "account_reconcile"
+    ]
+  },
+  "healthchecks": [],
+  "lifecycle": [
+    "preflight",
+    "install",
+    "configure",
+    "validate",
+    "enable",
+    "start",
+    "verify",
+    "reconcile",
+    "migrate",
+    "uninstall"
+  ]
+}

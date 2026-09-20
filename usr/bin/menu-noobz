@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DOMAIN="$(cat /etc/hamada/domain 2>/dev/null || hostname -f 2>/dev/null || hostname)"
+SERVER_IP="$(curl -4fsS https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
+
+pause(){ read -rp "Press Enter to continue..." _; }
+
+make_user(){
+  local raw="$1"
+  case "$raw" in
+    *@*) printf '%s' "$raw" ;;
+    *) printf '%s@sc-will' "$raw" ;;
+  esac
+}
+
+show_account(){
+  local user="$1" pass="$2" days="$3" dev="$4"
+  local expire
+  expire="$(date -u -d "+${days} days" +%F 2>/dev/null || echo "N/A")"
+
+  echo "NOOBZVPN ACCOUNT CREATED"
+  echo "━━━━━━━━━━━━━━━━━━━━"
+  echo "IP-Addres : $SERVER_IP"
+  echo "Hostname : $DOMAIN"
+  echo "Username : ${user}@noobz-id.github.io"
+  echo "Password : $pass"
+  echo "━━━━━━━━━━━━━━━━━━━━"
+  echo "Port TCP PLAIN (http) : 80"
+  echo "Port TCP SSL (https) : 443"
+  echo "Limit Device : $dev Device"
+  echo "Limit Quota : 1000000 GB"
+  echo "━━━━━━━━━━━━━━━━━━━━"
+  echo "Payload Websocket Noobz : GET /noobzvpn HTTP/1.1[crlf]Host: $DOMAIN[crlf]Upgrade: websocket[crlf]Connection: Keep-Alive[crlf]User-Agent: [ua][crlf][crlf]"
+  echo "━━━━━━━━━━━━━━━━━━━━"
+  echo "Expires on : $expire ($days Days)"
+}
+
+while true; do
+  clear
+  echo "============================================"
+  echo "        HAMADA NET NOOBZVPN MENU"
+  echo "============================================"
+  echo "[1] Create NoobzVPN Account"
+  echo "[2] Renew NoobzVPN Account"
+  echo "[3] Delete NoobzVPN Account"
+  echo "[4] Show NoobzVPN Account"
+  echo "[5] Show All NoobzVPN Accounts"
+  echo "[6] Restart NoobzVPN"
+  echo "[7] Status NoobzVPN"
+  echo "[0] Back"
+  echo "============================================"
+  read -rp "Select Menu : " opt
+
+  case "$opt" in
+    1)
+      read -rp "Username: " raw_user
+      user="$raw_user"
+      read -rp "Password: " pass
+      read -rp "Expired days [30]: " days
+      read -rp "Max devices [1]: " dev
+      days="${days:-30}"
+      dev="${dev:-1}"
+
+      if noobzvpns print "$user" >/dev/null 2>&1; then
+        echo "User already exists: $user"
+      else
+        noobzvpns add --password "$pass" --expired "$days" --devices "$dev" --bandwidth 1000000 "$user"
+        show_account "$user" "$pass" "$days" "$dev"
+      fi
+      pause
+      ;;
+    2) read -rp "Username: " u; noobzvpns renew "$u" || true; pause ;;
+    3) read -rp "Username: " u; noobzvpns remove "$u" || true; pause ;;
+    4) read -rp "Username: " u; noobzvpns print "$u" || true; pause ;;
+    5) noobzvpns print-all || true; pause ;;
+    6) systemctl restart noobzvpns; systemctl status noobzvpns --no-pager; pause ;;
+    7) systemctl status noobzvpns --no-pager; pause ;;
+    0) exit 0 ;;
+    *) echo "Invalid option"; sleep 1 ;;
+  esac
+done

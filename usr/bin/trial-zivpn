@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ACC_DIR="/etc/hamada/zivpn-accounts"
+DOMAIN="$(cat /etc/hamada/domain 2>/dev/null || hostname -I | awk '{print $1}')"
+mkdir -p "$ACC_DIR"
+
+get_next_port() {
+  python3 - <<'PY'
+from pathlib import Path
+import re
+ACC_DIR = Path("/etc/hamada/zivpn-accounts")
+used = set()
+for f in ACC_DIR.glob("*.conf"):
+    for line in f.read_text(errors="ignore").splitlines():
+        m = re.match(r'^port="?(\d+)"?$', line.strip())
+        if m:
+            used.add(int(m.group(1)))
+for p in range(6000, 20000):
+    if p not in used:
+        print(p)
+        raise SystemExit(0)
+raise SystemExit("ERROR: no ports available")
+PY
+}
+
+clear
+echo "============================================"
+echo "        HAMADA NET TRIAL ZIVPN"
+echo "============================================"
+
+read -rp "Customer Name [trial]: " customer
+customer="${customer:-trial}"
+
+safe_name="$(echo "$customer" | tr ' ' '_' | tr -cd 'A-Za-z0-9_.@-_' | head -c 32)"
+[ -n "$safe_name" ] || safe_name="trial"
+
+username="${safe_name}_$(date +%Y%m%d%H%M%S)"
+password="$(openssl rand -hex 4)"
+port="$(get_next_port)"
+expire_epoch="$(date -d "+1 days" +%s)"
+expire_date="$(date -d "@$expire_epoch" "+%Y-%m-%d")"
+
+cat > "$ACC_DIR/$username.conf" <<ACC
+username="$username"
+customer="$customer"
+password="$password"
+port="$port"
+created="$(date "+%Y-%m-%d")"
+expire_epoch="$expire_epoch"
+expire_date="$expire_date"
+ACC
+
+hn-zivpn-sync >/dev/null 2>&1 || true
+
+echo "============================================"
+echo "        HAMADA NET TRIAL ZIVPN"
+echo "============================================"
+echo "Name        : $customer"
+echo "Password    : $password"
+echo "Host        : $DOMAIN"
+echo "Port        : $port"
+echo "Expire      : $expire_date"
+echo "App         : ZIVPN > UDP"
+echo "============================================"
+echo "Use in ZIVPN:"
+echo "Host        : $DOMAIN"
+echo "Port        : $port"
+echo "Password    : $password"
+echo "============================================"
+read -rp "Press Enter to continue..."

@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ACC_DIR="/etc/hamada/wg-accounts"
+
+clear
+echo "============================================"
+echo "        HAMADA NET ACTIVE WIREGUARD LOGINS"
+echo "============================================"
+
+if ! systemctl is-active --quiet wg-quick@wg0 2>/dev/null; then
+  echo "WireGuard service is not active."
+  echo "============================================"
+  read -rp "Press Enter to continue..."
+  exit 0
+fi
+
+if [ ! -d "$ACC_DIR" ]; then
+  echo "No WireGuard accounts found."
+  echo "============================================"
+  read -rp "Press Enter to continue..."
+  exit 0
+fi
+
+python3 - <<'PY'
+import subprocess, time, re
+from pathlib import Path
+
+ACC_DIR = Path("/etc/hamada/wg-accounts")
+now = int(time.time())
+
+accounts = {}
+
+for f in ACC_DIR.glob("*.conf"):
+    d = {}
+    for line in f.read_text(errors="ignore").splitlines():
+        m = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)="?(.*?)"?$', line.strip())
+        if m:
+            d[m.group(1)] = m.group(2)
+
+    name = d.get("customer") or d.get("username") or f.stem
+    pub = d.get("client_public_key") or d.get("public_key") or d.get("pubkey") or ""
+
+    if pub:
+        accounts[pub] = name
+
+try:
+    raw = subprocess.check_output(["wg", "show", "all", "latest-handshakes"], text=True, stderr=subprocess.DEVNULL)
+except Exception:
+    raw = ""
+
+online = []
+
+for line in raw.splitlines():
+    parts = line.split()
+    if len(parts) < 3:
+        continue
+
+    pub = parts[1]
+    try:
+        hs = int(parts[2])
+    except Exception:
+        continue
+
+    if hs <= 0:
+        continue
+
+    age = now - hs
+
+    if age <= 180:
+        name = accounts.get(pub, "unknown")
+        online.append(name)
+
+if not online:
+    print("No active WireGuard clients now.")
+else:
+    i = 1
+    for name in online:
+        print(f"[{i:02d}] {name} | WireGuard | Online")
+        i += 1
+
+print("============================================")
+print(f"Online accounts: {len(online)}")
+PY
+
+echo "============================================"
+read -rp "Press Enter to continue..."

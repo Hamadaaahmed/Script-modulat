@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE="/etc/hamada/wg-accounts"
+WEB="/var/www/html/wg-files"
+DOMAIN="$(cat /etc/hamada/domain 2>/dev/null || hostname -I | awk '{print $1}')"
+WG_DOMAIN="$(cat /etc/hamada/wireguard-domain 2>/dev/null || printf '%s' "$DOMAIN")"
+SERVER_PUBLIC="$(cat /etc/hamada/wg-server-public.key)"
+mkdir -p "$BASE" "$WEB"
+chmod -R a+rX /var/www/html/wg-files 2>/dev/null || true
+
+next_ip() {
+  for i in $(seq 2 254); do
+    ip="10.30.0.$i"
+    grep -R "address=\"$ip\"" "$BASE" >/dev/null 2>&1 || { echo "$ip"; return; }
+  done
+  return 1
+}
+
+username="trialwg$(tr -dc a-z0-9 </dev/urandom | head -c 4)"
+private_key="$(wg genkey)"
+public_key="$(printf '%s\n' "$private_key" | wg pubkey)"
+address="$(next_ip)"
+expire="$(date -d "+1 days" +%Y-%m-%d)"
+expire_human="$(date -d "$expire" "+%b %d, %Y")"
+bug_host=""
+endpoint_host="$WG_DOMAIN"
+
+cat > "$BASE/$username.conf" <<EOFC
+username="$username"
+private_key="$private_key"
+public_key="$public_key"
+address="$address"
+expire="$expire"
+domain="$DOMAIN"
+bug_host="$bug_host"
+endpoint_host="$endpoint_host"
+EOFC
+chmod 600 "$BASE/$username.conf"
+
+cat > "$WEB/$username.conf" <<EOFC
+[Interface]
+PrivateKey = $private_key
+Address = $address/32
+DNS = 1.1.1.1, 8.8.8.8
+
+[Peer]
+PublicKey = $SERVER_PUBLIC
+Endpoint = $endpoint_host:51820
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25
+EOFC
+
+chmod 644 "$WEB/$username.conf"
+qrencode -o "$WEB/$username.png" < "$WEB/$username.conf" || true
+chmod 644 "$WEB/$username.png" 2>/dev/null || true
+
+hn-wg-sync
+
+clear
+echo "============================================"
+echo "        HAMADA NET TRIAL WIREGUARD"
+echo "============================================"
+echo "Username       : $username"
+echo "Expired On     : $expire_human"
+echo "Endpoint       : $endpoint_host:51820"
+echo "Client Address : $address/32"
+echo "Config Link    : http://$DOMAIN/wg-files/$username.conf"
+echo "QR Link        : http://$DOMAIN/wg-files/$username.png"
+echo "============================================"
+read -rp "Press Enter to continue..."

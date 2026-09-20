@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DOMAIN="$(cat /etc/hamada/domain 2>/dev/null || echo "")"
+[ -n "$DOMAIN" ] || DOMAIN="127.0.0.1"
+
+IFACE="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
+[ -n "$IFACE" ] || IFACE="eth0"
+
+echo "============================================"
+echo " HAMADA NET POST INSTALL NETWORK FIX"
+echo " Domain : $DOMAIN"
+echo " IFACE  : $IFACE"
+echo "============================================"
+
+echo "---- Fix WireGuard web links ----"
+command -v hamada-wg-web-fix >/dev/null 2>&1 && hamada-wg-web-fix || true
+rm -f /etc/nginx/conf.d/00-hamada-net-wg-files.conf 2>/dev/null || true
+
+python3 - <<'PY'
+from pathlib import Path
+
+p = Path("/etc/nginx/conf.d/hamada-ssh.conf")
+if not p.exists():
+    print("WARNING: /etc/nginx/conf.d/hamada-ssh.conf not found")
+    raise SystemExit(0)
+
+s = p.read_text()
+
+block = """
+    location ^~ /wg-files/ {
+        alias /var/www/html/wg-files/;
+        autoindex off;
+        default_type application/octet-stream;
+        add_header Content-Disposition "attachment";
+        try_files $uri =404;
+    }
+
+"""
+
+if "/wg-files/" not in s:
+    if "    location /ssh {" in s:
+        s = s.replace("    location /ssh {", block + "    location /ssh {", 1)
+        p.write_text(s)
+        print("Added /wg-files route inside main nginx route file")
+    else:
+        print("WARNING: location /ssh not found in nginx config")
+else:
+    print("/wg-files route already exists")
+PY
+
+mkdir -p /var/www/html/wg-files
+chmod -R a+rX /var/www/html/wg-files 2>/dev/null || true
+
+if command -v nginx >/dev/null 2>&1; then
+  nginx -t && systemctl reload nginx || true
+fi
+
+echo "---- Fix forwarding and NAT ----"
+cat > /etc/sysctl.d/99-hamada-net-forwarding.conf <<SYS
+net.ipv4.ip_forward=1
+net.ipv4.conf.all.forwarding=1
+net.ipv4.conf.default.forwarding=1
+net.ipv4.conf.all.accept_redirects=0
+net.ipv4.conf.all.send_redirects=0
+SYS
+
+sysctl --system >/dev/null 2>&1 || true
+sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+
+for NET in 169.254.0.0/16 10.20.0.0/24 10.21.0.0/24 10.30.0.0/24; do
+  iptables -t nat -C POSTROUTING -s "$NET" -o "$IFACE" -j MASQUERADE 2>/dev/null || \
+  iptables -t nat -A POSTROUTING -s "$NET" -o "$IFACE" -j MASQUERADE
+
+  iptables -C FORWARD -s "$NET" -o "$IFACE" -j ACCEPT 2>/dev/null || \
+  iptables -A FORWARD -s "$NET" -o "$IFACE" -j ACCEPT
+
+  iptables -C FORWARD -d "$NET" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+  iptables -A FORWARD -d "$NET" -m state --state RELATED,ESTABLISHED -j ACCEPT
+done
+
+mkdir -p /usr/local/sbin
+cat > /usr/local/sbin/hamada-net-firewall <<'FIRE'
+#!/usr/bin/env bash
+IFACE="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
+[ -n "$IFACE" ] || IFACE="eth0"
+
+sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+
+for NET in 169.254.0.0/16 10.20.0.0/24 10.21.0.0/24 10.30.0.0/24; do
+  iptables -t nat -C POSTROUTING -s "$NET" -o "$IFACE" -j MASQUERADE 2>/dev/null || \
+  iptables -t nat -A POSTROUTING -s "$NET" -o "$IFACE" -j MASQUERADE
+
+  iptables -C FORWARD -s "$NET" -o "$IFACE" -j ACCEPT 2>/dev/null || \
+  iptables -A FORWARD -s "$NET" -o "$IFACE" -j ACCEPT
+
+  iptables -C FORWARD -d "$NET" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+  iptables -A FORWARD -d "$NET" -m state --state RELATED,ESTABLISHED -j ACCEPT
+done
+FIRE
+
+chmod +x /usr/local/sbin/hamada-net-firewall
+
+cat > /etc/systemd/system/hamada-net-firewall.service <<SERVICE
+[Unit]
+Description=HAMADA NET Firewall NAT Rules
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hamada-net-firewall
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+systemctl daemon-reload
+systemctl enable hamada-net-firewall >/dev/null 2>&1 || true
+systemctl restart hamada-net-firewall || true
+
+echo "---- Fix L2TP DNS ----"
+if [ -f /etc/ppp/options.xl2tpd ]; then
+  grep -q '^ms-dns 1.1.1.1' /etc/ppp/options.xl2tpd || echo 'ms-dns 1.1.1.1' >> /etc/ppp/options.xl2tpd
+  grep -q '^ms-dns 8.8.8.8' /etc/ppp/options.xl2tpd || echo 'ms-dns 8.8.8.8' >> /etc/ppp/options.xl2tpd
+fi
+
+systemctl restart strongswan-starter xl2tpd 2>/dev/null || true
+systemctl restart wg-quick@wg0 2>/dev/null || true
+
+echo "HAMADA NET network fix completed."

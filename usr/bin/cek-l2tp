@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE="/etc/hamada/l2tp-accounts"
+mkdir -p "$BASE"
+
+expire_for_user() {
+  local u="$1"
+  local f="$BASE/$u.conf"
+  local username="" password="" expire="" domain=""
+  if [ -f "$f" ]; then
+    . "$f" || true
+    date -d "$expire" "+%b %d, %Y" 2>/dev/null || echo "$expire"
+  else
+    echo "unknown"
+  fi
+}
+
+print_user() {
+  local user="$1"
+  local proto="$2"
+  local exp
+  exp="$(expire_for_user "$user")"
+  printf "[%02d] %-18s | Expire: %-12s | %s\n" "$count" "$user" "$exp" "$proto"
+  count=$((count+1))
+  found=1
+}
+
+clear
+echo "============================================"
+echo "        HAMADA NET L2TP/IKEV2 LOGINS"
+echo "============================================"
+
+found=0
+count=1
+printed=" "
+
+# IKEv2 online leases
+leases="$(ipsec leases 2>/dev/null || true)"
+if [ -n "$leases" ]; then
+  while IFS= read -r line; do
+    echo "$line" | grep -qi 'online' || continue
+    user="$(echo "$line" | sed -n "s/.*'\([^']*\)'.*/\1/p" | head -n1)"
+    [ -n "$user" ] || continue
+    case "$printed" in *" $user "*) continue ;; esac
+    printed="$printed$user "
+    print_user "$user" "IKEv2"
+  done <<< "$leases"
+fi
+
+# IKEv2 status fallback by matching saved usernames
+status="$(ipsec statusall 2>/dev/null || true)"
+if echo "$status" | grep -qi 'ESTABLISHED'; then
+  for f in "$BASE"/*.conf; do
+    [ -f "$f" ] || continue
+    username="" password="" expire="" domain=""
+    . "$f" || true
+    [ -n "${username:-}" ] || continue
+    case "$printed" in *" $username "*) continue ;; esac
+    if echo "$status" | grep -Fqi "$username"; then
+      printed="$printed$username "
+      print_user "$username" "IKEv2"
+    fi
+  done
+
+  # If an IKEv2 session exists but strongSwan hides the username
+  if [ "$found" -eq 0 ]; then
+    echo "[01] IKEv2 session active | username not exposed by status"
+    found=1
+    count=2
+  fi
+fi
+
+# L2TP PPP sessions
+ppp_lines="$(ip -o addr show 2>/dev/null | awk '/ppp[0-9]/ {print $2" "$4}' || true)"
+if [ -n "$ppp_lines" ]; then
+  while read -r iface addr; do
+    [ -n "$iface" ] || continue
+    printf "[%02d] %-18s | %-16s | L2TP\n" "$count" "$iface" "$addr"
+    count=$((count+1))
+    found=1
+  done <<< "$ppp_lines"
+fi
+
+if [ "$found" -eq 0 ]; then
+  echo "No connected L2TP/IKEv2 accounts now."
+fi
+
+echo "============================================"
+read -rp "Press Enter to continue..."

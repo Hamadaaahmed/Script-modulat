@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+clear
+echo "============================================"
+echo "      RESTORE HAMADA DEFAULT SETTINGS"
+echo "============================================"
+echo "This will restore default script settings:"
+echo "- OpenSSH port 22"
+echo "- Dropbear ports 109,143"
+echo "- Rebuild Nginx/HAProxy/Xray configs via installer update"
+echo "- Keep current domain and accounts"
+echo "============================================"
+read -rp "Type RESTORE to continue: " confirm
+
+[ "$confirm" = "RESTORE" ] || { echo "Cancelled."; sleep 1; exit 0; }
+
+mkdir -p /run/sshd
+chmod 755 /run/sshd
+
+systemctl stop dropbear 2>/dev/null || true
+pkill -x dropbear 2>/dev/null || true
+
+cat > /etc/default/dropbear <<'DROPBEAR'
+NO_START=0
+DROPBEAR_PORT=109
+DROPBEAR_EXTRA_ARGS="-p 109 -p 143"
+DROPBEAR_BANNER="/etc/issue.net"
+DROPBEAR_RECEIVE_WINDOW=65536
+DROPBEAR_KEEPALIVE=300
+DROPBEAR_IDLE_TIMEOUT=0
+DROPBEAR
+
+mkdir -p /etc/ssh/sshd_config.d
+cat > /etc/ssh/sshd_config.d/99-hamada.conf <<'SSHCFG'
+Port 22
+AddressFamily inet
+ListenAddress 0.0.0.0
+PasswordAuthentication yes
+PermitRootLogin yes
+UsePAM yes
+SSHCFG
+
+sshd -t
+systemctl daemon-reload
+systemctl enable ssh dropbear >/dev/null 2>&1 || true
+systemctl restart ssh
+systemctl restart dropbear
+
+hamada-update
+if [ -x /root/commercial-vps-autoscript/setup.sh ]; then
+  HAMADA_UPDATE_MODE=1 HAMADA_NO_REBOOT=1 bash /root/commercial-vps-autoscript/setup.sh
+else
+  echo "[ERROR] Local installer not found after update." >&2
+  exit 1
+fi
+
+echo "============================================"
+echo "[OK] Default settings restored."
+echo "============================================"
+read -rp "Press Enter to continue..."

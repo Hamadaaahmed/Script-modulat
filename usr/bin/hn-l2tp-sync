@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE="/etc/hamada/l2tp-accounts"
+DOMAIN="$(cat /etc/hamada/domain 2>/dev/null || hostname -I | awk '{print $1}')"
+PSK="$(cat /etc/hamada/l2tp-ipsec.psk 2>/dev/null || true)"
+TODAY="$(date +%Y-%m-%d)"
+
+mkdir -p "$BASE" /etc/ppp
+
+{
+  echo ': RSA hamada-net-server-key.pem'
+  [ -n "$PSK" ] && echo "%any %any : PSK \"$PSK\""
+  for f in "$BASE"/*.conf; do
+    [ -f "$f" ] || continue
+    username=""
+    password=""
+    expire=""
+    . "$f" || true
+    [ -n "${username:-}" ] || continue
+    [ -n "${password:-}" ] || continue
+    [ -n "${expire:-}" ] || continue
+    if [[ "$expire" < "$TODAY" ]]; then
+      continue
+    fi
+    echo "\"$username\" : EAP \"$password\""
+  done
+} > /etc/ipsec.secrets
+
+{
+  echo '# Secrets for HAMADA NET L2TP'
+  for f in "$BASE"/*.conf; do
+    [ -f "$f" ] || continue
+    username=""
+    password=""
+    expire=""
+    . "$f" || true
+    [ -n "${username:-}" ] || continue
+    [ -n "${password:-}" ] || continue
+    [ -n "${expire:-}" ] || continue
+    if [[ "$expire" < "$TODAY" ]]; then
+      continue
+    fi
+    printf '"%s" * "%s" *\n' "$username" "$password"
+  done
+} > /etc/ppp/chap-secrets
+
+chmod 600 /etc/ipsec.secrets /etc/ppp/chap-secrets || true
+
+# Reload account secrets without making sync fail when a service is not installed yet.
+ipsec rereadsecrets >/dev/null 2>&1 || true
+ipsec reload >/dev/null 2>&1 || true
+systemctl restart strongswan-starter >/dev/null 2>&1 || systemctl restart strongswan >/dev/null 2>&1 || true
+systemctl restart xl2tpd >/dev/null 2>&1 || true
+systemctl restart hamada-l2tp-firewall >/dev/null 2>&1 || true

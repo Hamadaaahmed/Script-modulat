@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+while true; do
+  clear
+  echo "============================================"
+  echo "           HAMADA NET WIREGUARD MENU"
+  echo "============================================"
+  echo "[1] Create WireGuard Account"
+  echo "[2] Trial WireGuard Account"
+  echo "[3] Renew WireGuard Account"
+  echo "[4] Delete WireGuard Account"
+  echo "[5] Check WireGuard Logins"
+  echo "[6] Show WireGuard Accounts"
+  echo "[0] Back"
+  echo "============================================"
+  read -rp "Select option: " opt
+
+  case "$opt" in
+    1) add-wg ;;
+    2) trial-wg ;;
+    3) renew-wg ;;
+    4) del-wg ;;
+    5) cek-wg ;;
+    6) show-wg ;;
+    0) exit 0 ;;
+    *) echo "Invalid option"; sleep 1 ;;
+  esac
+done

@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PREFIX="${1:-pub}"
+DAYS="${2:-7}"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+OUT="/root/xray-public-${PREFIX}-${STAMP}.txt"
+
+PRESETS=(
+  vless-ws-tls
+  vless-grpc-tls
+  vless-xhttp-tls
+  vless-httpupgrade-tls
+
+  vmess-ws-tls
+  vmess-grpc-tls
+  vmess-xhttp-tls
+  vmess-httpupgrade-tls
+
+  trojan-ws-tls
+  trojangrpc-tls
+  trojan-xhttp-tls
+  trojan-httpupgrade-tls
+
+  ss-ws-tls
+  ss-grpc-tls
+)
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "[ERROR] Missing command: $1" >&2
+    exit 1
+  }
+}
+
+need_cmd xrayctl
+need_cmd add-xray
+need_cmd show-xray
+need_cmd list-xray
+
+available_presets="$(xrayctl presets 2>/dev/null | awk '$1 ~ /^\[[0-9]+\]$/ {print $2}' || true)"
+
+{
+  echo "============================================"
+  echo " XRAY PUBLIC 80/443 SUPPORTED ACCOUNTS"
+  echo "============================================"
+  echo "Prefix : $PREFIX"
+  echo "Days   : $DAYS"
+  echo "Date   : $(date)"
+  echo
+  echo "Public 443:"
+  echo "  WS / gRPC / XHTTP / HTTPUpgrade"
+  echo
+  echo "Public 80:"
+  echo "  WS / HTTPUpgrade"
+  echo "  Some clients may not support gRPC/XHTTP on clear HTTP/80."
+  echo "============================================"
+  echo
+
+  n=1
+  for preset in "${PRESETS[@]}"; do
+    if ! printf '%s\n' "$available_presets" | grep -Fxq -- "$preset"; then
+      echo "[SKIP] preset not found: $preset"
+      echo
+      n=$((n+1))
+      continue
+    fi
+
+    user="$(printf '%s%02d' "$PREFIX" "$n")"
+    if list-xray 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$user"; then
+      user="${user}_$(date +%H%M%S)"
+    fi
+
+    echo "--------------------------------------------"
+    echo "[ADD] $user -> $preset"
+    echo "--------------------------------------------"
+
+    if add-xray "$user" "$DAYS" "$preset"; then
+      echo
+      show-xray "$user"
+    else
+      echo "[FAIL] $user -> $preset"
+    fi
+
+    echo
+    n=$((n+1))
+  done
+
+  echo "============================================"
+  echo "Saved file: $OUT"
+  echo "Public ports: TCP 80/443 only via HAProxy/Nginx"
+  echo "============================================"
+} | tee "$OUT"

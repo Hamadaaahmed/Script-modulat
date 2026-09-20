@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+clear
+echo "============================================"
+echo "          HAMADA NET SPEEDTEST"
+echo "============================================"
+
+if ! command -v speedtest >/dev/null 2>&1; then
+  echo "[INFO] Installing speedtest-cli..."
+  apt update
+  apt install -y speedtest-cli || pip3 install speedtest-cli --break-system-packages || pip3 install speedtest-cli
+fi
+
+echo
+speedtest-cli --simple || speedtest || true
+echo "============================================"
+read -rp "Press Enter to continue..."

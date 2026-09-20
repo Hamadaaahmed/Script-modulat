@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ACC_DIR="/etc/hamada/zivpn-accounts"
+SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+TMP="$(mktemp)"
+
+clear
+echo "============================================"
+echo "        HAMADA NET ACTIVE ZIVPN LOGINS"
+echo "============================================"
+
+if ! systemctl is-active --quiet zivpn.service 2>/dev/null; then
+  echo "ZIVPN service is not active."
+  echo "============================================"
+  read -rp "Press Enter to continue..."
+  exit 0
+fi
+
+conntrack -L -p udp 2>/dev/null > "$TMP" || true
+
+python3 - "$SERVER_IP" "$TMP" <<'PY'
+import sys, re
+from pathlib import Path
+
+server_ip = sys.argv[1]
+conntrack_file = sys.argv[2]
+acc_dir = Path("/etc/hamada/zivpn-accounts")
+
+accounts = {}
+ordered = []
+
+for f in sorted(acc_dir.glob("*.conf"), key=lambda p: p.stat().st_mtime):
+    d = {}
+    for line in f.read_text(errors="ignore").splitlines():
+        m = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)="?(.*?)"?$', line.strip())
+        if m:
+            d[m.group(1)] = m.group(2)
+
+    acc = {
+        "name": d.get("customer") or d.get("username") or f.stem,
+        "password": d.get("password", "UNKNOWN"),
+        "port": d.get("port", ""),
+    }
+    ordered.append(acc)
+    if acc["port"]:
+        accounts[acc["port"]] = acc
+
+latest = ordered[-1] if ordered else {"name": "UNKNOWN", "password": "UNKNOWN", "port": ""}
+
+try:
+    lines = open(conntrack_file, "r", errors="ignore").read().splitlines()
+except Exception:
+    lines = []
+
+active_ports = set()
+fallback_online = False
+
+for line in lines:
+    srcs = re.findall(r'\bsrc=([0-9.]+)', line)
+    sports = re.findall(r'\bsport=([0-9]+)', line)
+    dports = re.findall(r'\bdport=([0-9]+)', line)
+    all_ports = sports + dports
+
+    is_public = False
+    for ip in srcs:
+        if ip and ip != server_ip and not ip.startswith(("10.", "169.254.", "127.")):
+            is_public = True
+            break
+
+    if not is_public:
+        continue
+
+    matched = [p for p in all_ports if p in accounts]
+    if matched:
+        active_ports.add(matched[0])
+    elif "5667" in all_ports or any(p.isdigit() and 6000 <= int(p) <= 19999 for p in all_ports):
+        fallback_online = True
+
+printed = []
+i = 1
+
+for port in sorted(active_ports, key=lambda x: int(x)):
+    acc = accounts[port]
+    print(f"[{i:02d}] {acc['name']} | {acc['password']} | Online")
+    printed.append(port)
+    i += 1
+
+if fallback_online and latest["port"] not in printed:
+    print(f"[{i:02d}] {latest['name']} | {latest['password']} | Online")
+    i += 1
+
+if i == 1:
+    print("No active ZIVPN clients now.")
+
+print("============================================")
+print(f"Online accounts: {i-1}")
+PY
+
+rm -f "$TMP"
+
+echo "============================================"
+read -rp "Press Enter to continue..."

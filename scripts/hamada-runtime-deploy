@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import argparse, sys
+ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))
+from hamada.runtime.deployment import RuntimeDeployment, DeploymentError
+
+def main():
+    ap=argparse.ArgumentParser(); ap.add_argument("action",choices=["deploy","status","rollback"]); ap.add_argument("--root",default="/opt/hamada"); ap.add_argument("--source",default=str(ROOT)); ns=ap.parse_args()
+    d=RuntimeDeployment(ns.root)
+    if ns.action=="deploy": print(d.deploy(ns.source)); return 0
+    if ns.action=="rollback": print(d.rollback()); return 0
+    s=d.status(); print(f"root={s.root}\nactive={s.active_version or '-'}\nprevious={s.previous_version or '-'}\nhealthy={'yes' if s.healthy else 'no'}"); return 0 if s.healthy else 20
+if __name__=="__main__":
+    try: raise SystemExit(main())
+    except DeploymentError as e: print(f"ERROR: {e}",file=sys.stderr); raise SystemExit(20)

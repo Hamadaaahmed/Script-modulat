@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BRAND="HAMADA NET"
+STORE="/etc/hamada/ssh-accounts"
+
+get_users() {
+  local file username
+
+  [ -d "$STORE" ] || return 0
+
+  for file in "$STORE"/*.conf; do
+    [ -f "$file" ] || continue
+    username="$(basename "$file" .conf)"
+    id "$username" >/dev/null 2>&1 || continue
+    printf '%s\n' "$username"
+  done | sort
+}
+
+get_expire() {
+  chage -l "$1" 2>/dev/null | awk -F': ' '/Account expires/{print $2}'
+}
+
+mapfile -t USERS < <(get_users)
+
+clear
+echo "============================================"
+echo "          ${BRAND} DELETE SSH ACCOUNT"
+echo "============================================"
+
+if [ "${#USERS[@]}" -eq 0 ]; then
+  echo "No SSH accounts found."
+  echo "============================================"
+  read -rp "Press Enter to continue..."
+  exit 0
+fi
+
+for i in "${!USERS[@]}"; do
+  u="${USERS[$i]}"
+  printf "[%02d] %-16s | Expire: %s\n" \
+    "$((i+1))" "$u" "$(get_expire "$u")"
+done
+
+printf "[00] Back\n"
+echo "============================================"
+read -rp "Select account number to delete: " N
+
+case "$N" in
+  0|00) exit 0 ;;
+esac
+
+echo "$N" | grep -Eq '^[0-9]+$' || { echo "Invalid number"; sleep 1; exit 1; }
+
+idx=$((N-1))
+[ "$idx" -ge 0 ] && [ "$idx" -lt "${#USERS[@]}" ] || { echo "Invalid selection"; sleep 1; exit 1; }
+
+USERNAME="${USERS[$idx]}"
+
+echo "Selected account: $USERNAME"
+read -rp "Confirm delete by typing y: " C
+[ "$C" = "y" ] || [ "$C" = "Y" ] || { echo "Cancelled."; sleep 1; exit 0; }
+
+pkill -u "$USERNAME" 2>/dev/null || true
+userdel "$USERNAME" 2>/dev/null || true
+rm -f "$STORE/${USERNAME}.conf"
+
+echo "============================================"
+echo "Deleted: $USERNAME"
+echo "============================================"
+read -rp "Press Enter to continue..."

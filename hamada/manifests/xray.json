@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "id": "xray",
+  "name": "Xray",
+  "version": "legacy-observed-1",
+  "description": "Legacy Xray manager and all observed protocol/transport presets.",
+  "dependencies": {
+    "modules": [
+      "edge"
+    ],
+    "optional_modules": [],
+    "infrastructure": []
+  },
+  "conflicts": {
+    "modules": [],
+    "notes": []
+  },
+  "requirements": {
+    "packages": [],
+    "binaries": [
+      "xray"
+    ],
+    "certificate": true,
+    "edge": true
+  },
+  "paths": {
+    "config": [
+      "/usr/local/etc/xray/config.json"
+    ],
+    "data": [
+      "/etc/hamada/xray/accounts.json"
+    ],
+    "legacy": []
+  },
+  "services": [
+    {
+      "name": "xray.service",
+      "ownership": "legacy"
+    },
+    {
+      "name": "hamada-xray-firewall.service",
+      "ownership": "legacy"
+    }
+  ],
+  "ports": {
+    "public_tcp": [
+      {
+        "start": 8443,
+        "end": 8468,
+        "purpose": "Observed Xray preset TCP range"
+      }
+    ],
+    "public_udp": [
+      {
+        "port": 443,
+        "purpose": "VLESS mKCP"
+      },
+      {
+        "port": 8459,
+        "purpose": "VMess mKCP"
+      }
+    ],
+    "internal_tcp": [
+      {
+        "port": 10085,
+        "purpose": "Xray API"
+      }
+    ],
+    "internal_udp": []
+  },
+  "firewall": {
+    "ownership": "legacy",
+    "requirements": [
+      "Legacy Xray firewall service"
+    ]
+  },
+  "edge": {
+    "ownership": "legacy",
+    "routes": [
+      {
+        "kind": "legacy-web-transports",
+        "transports": [
+          "ws",
+          "grpc",
+          "xhttp",
+          "httpupgrade"
+        ]
+      }
+    ],
+    "backends": []
+  },
+  "accounts": {
+    "supported": true,
+    "backend": "Xray accounts.json",
+    "capabilities": [
+      "account_create",
+      "account_delete",
+      "account_renew",
+      "account_expire",
+      "account_list",
+      "account_status",
+      "account_reconcile"
+    ]
+  },
+  "healthchecks": [],
+  "lifecycle": [
+    "preflight",
+    "install",
+    "configure",
+    "validate",
+    "enable",
+    "start",
+    "verify",
+    "reconcile",
+    "migrate",
+    "uninstall"
+  ]
+}

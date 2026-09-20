@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BRAND="HAMADA NET"
+STORE="/etc/hamada/ssh-accounts"
+DOMAIN="$(cat /etc/hamada/domain 2>/dev/null || true)"
+[ -n "$DOMAIN" ] || DOMAIN="$(hostname -I | awk '{print $1}')"
+
+get_users() {
+  local file username
+
+  [ -d "$STORE" ] || return 0
+
+  for file in "$STORE"/*.conf; do
+    [ -f "$file" ] || continue
+    username="$(basename "$file" .conf)"
+    id "$username" >/dev/null 2>&1 || continue
+    printf '%s\n' "$username"
+  done | sort
+}
+
+get_expire() {
+  chage -l "$1" 2>/dev/null | awk -F': ' '/Account expires/{print $2}'
+}
+
+days_left() {
+  local exp="$1" exp_ts today_ts left
+  [ -n "$exp" ] && [ "$exp" != "never" ] || { echo 0; return; }
+  exp_ts="$(date -d "$exp" +%s 2>/dev/null || echo 0)"
+  today_ts="$(date -d "today 00:00:00" +%s)"
+  left=$(( (exp_ts - today_ts) / 86400 ))
+  [ "$left" -gt 0 ] || left=0
+  echo "$left"
+}
+
+left_text() {
+  local u="$1" exp="$2" ts now diff d h m
+  if [ -f "$STORE/${u}.conf" ]; then
+    ts="$(grep -i '^EXPIRE_TS=' "$STORE/${u}.conf" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d "'\"")"
+    if echo "${ts:-}" | grep -Eq '^[0-9]+$'; then
+      now="$(date +%s)"
+      diff=$((ts - now))
+      [ "$diff" -gt 0 ] || { echo "0m"; return; }
+      d=$((diff/86400))
+      h=$(((diff%86400)/3600))
+      m=$(((diff%3600)/60))
+      if [ "$d" -gt 0 ]; then echo "${d}d"; elif [ "$h" -gt 0 ]; then echo "${h}h${m}m"; else echo "${m}m"; fi
+      return
+    fi
+  fi
+  echo "$(days_left "$exp")d"
+}
+
+
+online_count_user() {
+  local u="$1" pids conn pid
+  pids="$(pgrep -u "$u" 2>/dev/null || true)"
+  [ -n "$pids" ] || { echo 0; return; }
+  conn=0
+  for pid in $pids; do
+    if ss -ntp 2>/dev/null | grep -q "pid=$pid,"; then
+      conn=$((conn+1))
+    fi
+  done
+  echo "$conn"
+}
+
+
+
+slowdns_account_block() {
+  local slowdns_domain ns_host public_key
+
+  echo "--------------------------------------------"
+  echo "SLOWDNS"
+
+  if [ ! -s /etc/hamada/slowdns/server.pub ]; then
+    echo "Status         : Not configured"
+    return
+  fi
+
+  slowdns_domain="$(
+    cat /etc/hamada/slowdns-domain 2>/dev/null ||
+    echo "ns-${DOMAIN%%.*}.${DOMAIN#*.}"
+  )"
+
+  ns_host="$(
+    cat /etc/hamada/slowdns-ns-host 2>/dev/null ||
+    echo "$DOMAIN"
+  )"
+
+  public_key="$(
+    tr -d '\r\n ' < /etc/hamada/slowdns/server.pub
+  )"
+
+  echo "Status         : Enabled"
+  echo "Tunnel Domain  : $slowdns_domain"
+  echo "NS Host        : $ns_host"
+  echo "Public Key     : $public_key"
+  echo "DNS            : 8.8.8.8 / 1.1.1.1"
+  echo "Public Ports   : 53, 80, 443"
+  echo "Mode           : SSH ON / V2Ray OFF"
+}
+
+print_details() {
+  local u="$1" p="(not saved)" exp limit left
+
+  exp="$(get_expire "$u")"
+
+  if [ -f "$STORE/${u}.conf" ]; then
+    # shellcheck disable=SC1090
+    source "$STORE/${u}.conf"
+    p="${PASSWORD:-$p}"
+    exp="${EXP_DATE:-$exp}"
+    limit="${LIMIT_GB:-0}"
+  else
+    limit="0"
+  fi
+
+  left="$(left_text "$u" "$exp")"
+
+  clear
+  echo "============================================"
+  echo "          ${BRAND} SSH ACCOUNT"
+  echo "============================================"
+  echo "Username       : $u"
+  echo "Password       : $p"
+  echo "Days Left      : ${left}"
+  echo "Expired On     : $exp"
+  echo "Host           : $DOMAIN"
+  echo "IP             : $(cat /etc/hamada/server-ip 2>/dev/null || hostname -I | awk '{print $1}')"
+  echo "OpenSSH        : 22"
+  echo "Dropbear       : 109, 143"
+  echo "SSH WS         : 80 path / or /ssh or /ws"
+  echo "SSH WS TLS     : 443 path / or /ssh or /ws"
+  echo "Dropbear WS    : 80/443 path /dropbear or /db"
+  echo "Dropbear TLS   : 444, 777"
+  echo "Squid Proxy    : 3128, 8080"
+  echo "OpenVPN TCP    : http://${DOMAIN}/vpn-files/client-tcp-1194.ovpn"
+  echo "OpenVPN UDP    : http://${DOMAIN}/vpn-files/client-udp-2200.ovpn"
+  echo "OpenVPN WS 443 : http://${DOMAIN}/vpn-files/ws%20443.ovpn"
+  echo "OpenVPN WS 80  : http://${DOMAIN}/vpn-files/ws%2080.ovpn"
+  echo "SSH Payloads   : http://${DOMAIN}/payloads/${u}/ssh-ws.txt"
+  echo "OVPN Payloads  : http://${DOMAIN}/payloads/${u}/ovpn-ws.txt"
+  echo "UDP Custom     : Enabled"
+  echo "UDP Host       : ${DOMAIN}"
+  echo "UDP Ports      : 1-65535"
+  echo "UDP Excluded   : 53,68,500,1701,2200,4500,5667,6000-19999,10994,36712,51820"
+  echo "UDP Username   : $u"
+  echo "UDP Password   : $p"
+  slowdns_account_block
+  echo "============================================"
+  echo "SSH WebSocket Payload:"
+  echo "GET / HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]"
+  echo "============================================"
+  echo "OpenVPN WebSocket Payload:"
+  echo "GET /openvpn HTTP/1.1[crlf]Host: ${DOMAIN}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]"
+  echo "============================================"
+}
+
+mapfile -t USERS < <(get_users)
+
+clear
+echo "============================================"
+echo "          ${BRAND} SSH ACCOUNTS"
+echo "============================================"
+
+if [ "${#USERS[@]}" -eq 0 ]; then
+  echo "No SSH accounts found."
+  echo "============================================"
+  read -rp "Press Enter to continue..."
+  exit 0
+fi
+
+for i in "${!USERS[@]}"; do
+  u="${USERS[$i]}"
+  exp="$(get_expire "$u")"
+  left="$(left_text "$u" "$exp")"
+  on="$(online_count_user "$u")"
+
+  printf "[%02d] %-16s | Expire: %-12s | Left: %-6s | Online:%s\n" \
+    "$((i+1))" "$u" "$exp" "$left" "$on"
+done
+
+printf "[00] Back\n"
+echo "============================================"
+read -rp "Select account number to show: " N
+
+case "$N" in
+  0|00) exit 0 ;;
+esac
+
+echo "$N" | grep -Eq '^[0-9]+$' || { echo "Invalid number"; sleep 1; exit 1; }
+
+idx=$((N-1))
+[ "$idx" -ge 0 ] && [ "$idx" -lt "${#USERS[@]}" ] || { echo "Invalid selection"; sleep 1; exit 1; }
+
+print_details "${USERS[$idx]}"
+read -rp "Press Enter to continue..."

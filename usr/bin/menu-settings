@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+while true; do
+  clear
+  echo "============================================"
+  echo "          HAMADA NET SETTINGS"
+  echo "============================================"
+  echo "[1] Show Saved Domain Settings"
+  echo "[2] Speedtest Server"
+  echo "[3] Restore Script Default Settings"
+  echo "[4] Public Protocols & Ports"
+  echo "[5] Full Uninstall / Clean Reset"
+  echo "[0] Back"
+  echo "============================================"
+  read -rp "Select option: " opt
+
+  case "$opt" in
+    1)
+      echo
+      echo "Main domain      : $(cat /etc/hamada/domain 2>/dev/null || echo 'not set')"
+      echo "A-record hostname: $(cat /etc/hamada/a-domain 2>/dev/null || echo 'not set')"
+      echo "SlowDNS NS       : $(cat /etc/hamada/slowdns-ns 2>/dev/null || echo 'not set')"
+      echo "WireGuard domain : $(cat /etc/hamada/wireguard-domain 2>/dev/null || echo 'not set')"
+      echo
+      read -rp "Press Enter to continue..." _
+      ;;
+    2) hamada-speedtest ;;
+    3) hamada-restore-defaults ;;
+    4) hamada-public-ports ;;
+    5)
+      clear
+      if command -v hamada-uninstall >/dev/null 2>&1; then
+        hamada-uninstall --full
+        exit 0
+      else
+        echo "ERROR: hamada-uninstall command not found."
+        read -rp "Press Enter to continue..." _
+      fi
+      ;;
+    0) exit 0 ;;
+    *) echo "Invalid option"; sleep 1 ;;
+  esac
+done

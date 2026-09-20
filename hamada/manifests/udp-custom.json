@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "id": "udp-custom",
+  "name": "UDP Custom",
+  "version": "legacy-observed-1",
+  "description": "Legacy UDP Custom tunnel and UDPGW.",
+  "dependencies": {
+    "modules": [],
+    "optional_modules": [],
+    "infrastructure": []
+  },
+  "conflicts": {
+    "modules": [],
+    "notes": []
+  },
+  "requirements": {
+    "packages": [],
+    "binaries": [
+      "udp-custom",
+      "badvpn-udpgw"
+    ],
+    "certificate": false,
+    "edge": false
+  },
+  "paths": {
+    "config": [],
+    "data": [],
+    "legacy": []
+  },
+  "services": [
+    {
+      "name": "hamada-udp-custom.service",
+      "ownership": "legacy"
+    },
+    {
+      "name": "hamada-udp-custom-udpgw.service",
+      "ownership": "legacy"
+    },
+    {
+      "name": "hamada-udp-custom-firewall.service",
+      "ownership": "legacy"
+    }
+  ],
+  "ports": {
+    "public_tcp": [],
+    "public_udp": [
+      {
+        "start": 1,
+        "end": 65535,
+        "purpose": "Legacy UDP Custom catch-all subject to exclusions"
+      }
+    ],
+    "internal_tcp": [],
+    "internal_udp": [
+      {
+        "port": 36712,
+        "purpose": "UDP Custom backend"
+      },
+      {
+        "port": 7800,
+        "purpose": "UDPGW"
+      }
+    ]
+  },
+  "firewall": {
+    "ownership": "legacy",
+    "requirements": [
+      "HAMADA_UDP_CUSTOM chain and legacy exclusions"
+    ]
+  },
+  "edge": {
+    "ownership": "none",
+    "routes": [],
+    "backends": []
+  },
+  "accounts": {
+    "supported": false,
+    "backend": null,
+    "capabilities": []
+  },
+  "healthchecks": [],
+  "lifecycle": [
+    "preflight",
+    "install",
+    "configure",
+    "validate",
+    "enable",
+    "start",
+    "verify",
+    "reconcile",
+    "migrate",
+    "uninstall"
+  ]
+}

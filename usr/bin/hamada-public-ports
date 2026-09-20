@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+import re
+import sys
+from pathlib import Path
+
+LINE_WIDTH = 58
+NAME_WIDTH = 34
+
+
+def row(name, ports):
+    print(f"{name:<{NAME_WIDTH}}{ports}")
+
+
+def section(title):
+    print()
+    print(title)
+    print("-" * LINE_WIDTH)
+
+
+def load_xray():
+    local = Path(__file__).resolve().with_name("xrayctl")
+    source = local if local.exists() else Path("/usr/bin/xrayctl")
+
+    if not source.exists():
+        return {}, [], set(), set()
+
+    namespace = {
+        "__name__": "hamada_public_ports_xray",
+        "__file__": str(source),
+    }
+
+    try:
+        exec(
+            compile(
+                source.read_text(),
+                str(source),
+                "exec",
+            ),
+            namespace,
+        )
+
+        presets = namespace.get("PRESETS", {})
+        accounts = namespace.get("load_accounts", lambda: [])()
+        is_active = namespace.get("is_active", lambda account: True)
+
+        active_accounts = [
+            account
+            for account in accounts
+            if is_active(account)
+        ]
+
+        return (
+            presets,
+            active_accounts,
+            set(namespace.get("WEB_NETS", set())),
+            set(namespace.get("PLAIN80_NETS", set())),
+        )
+
+    except Exception:
+        return {}, [], set(), set()
+
+
+def xray_public_ports(
+    preset_name,
+    preset,
+    accounts,
+    web_networks,
+    plain80_networks,
+):
+    network = str(preset.get("net", ""))
+    security = str(preset.get("sec", ""))
+
+    if security == "tls" and network in plain80_networks:
+        return "80, 443"
+
+    if security == "tls" and network in web_networks:
+        return "443"
+
+    actual_ports = set()
+
+    for account in accounts:
+        if account.get("preset") != preset_name:
+            continue
+
+        port = str(account.get("port", "")).strip()
+        if port.isdigit():
+            actual_ports.add(int(port))
+
+    if actual_ports:
+        return ", ".join(str(port) for port in sorted(actual_ports))
+
+    return str(preset.get("base", "N/A"))
+
+
+def wireguard_port():
+    config = Path("/etc/wireguard/wg0.conf")
+
+    if config.exists():
+        match = re.search(
+            r"(?im)^\s*ListenPort\s*=\s*(\d+)\s*$",
+            config.read_text(errors="ignore"),
+        )
+        if match:
+            return match.group(1)
+
+    return "51820"
+
+
+def psiphon_ports():
+    defaults = [
+        ("Psiphon SSH", "10990"),
+        ("Psiphon OSSH", "10991"),
+        ("Psiphon Unfronted MEEK", "10992"),
+        ("Psiphon MEEK HTTPS", "10993"),
+        ("Psiphon QUIC", "10994"),
+    ]
+
+    guide = Path("/root/psiphon/HTTP-CUSTOM-PSIPHON.txt")
+
+    if not guide.exists():
+        return defaults
+
+    text = guide.read_text(errors="ignore")
+    patterns = [
+        ("Psiphon SSH", r"(?im)^\s*SSH\s+TCP\s+(\d+)\s*$"),
+        ("Psiphon OSSH", r"(?im)^\s*OSSH\s+TCP\s+(\d+)\s*$"),
+        (
+            "Psiphon Unfronted MEEK",
+            r"(?im)^\s*UNFRONTED MEEK\s+TCP\s+(\d+)\s*$",
+        ),
+        (
+            "Psiphon MEEK HTTPS",
+            r"(?im)^\s*UNFRONTED MEEK-HTTPS\s+TCP\s+(\d+)\s*$",
+        ),
+        ("Psiphon QUIC", r"(?im)^\s*QUIC\s+UDP\s+(\d+)\s*$"),
+    ]
+
+    results = []
+
+    for label, pattern in patterns:
+        match = re.search(pattern, text)
+        fallback = dict(defaults)[label]
+        results.append((label, match.group(1) if match else fallback))
+
+    return results
+
+
+if sys.stdout.isatty():
+    print("\033[2J\033[H", end="")
+
+print("=" * LINE_WIDTH)
+print("PUBLIC PROTOCOLS & PORTS".center(LINE_WIDTH))
+print("=" * LINE_WIDTH)
+
+section("SSH SERVICES")
+row("SSH WebSocket", "80, 443")
+row("Dropbear WebSocket", "80, 443")
+row("OpenVPN WebSocket", "80, 443")
+row("OpenSSH", "22")
+row("Dropbear", "109, 143")
+row("Dropbear TLS", "444, 777")
+row("Squid Proxy", "3128, 8080")
+row("OpenVPN TCP", "1194")
+row("OpenVPN UDP", "2200")
+row("SlowDNS", "53, 80, 443")
+
+section("XRAY SERVICES")
+
+presets, accounts, web_networks, plain80_networks = load_xray()
+
+hidden_protocols = {
+    "socks",
+    "http",
+    "dokodemo-door",
+}
+
+xray_rows = []
+
+for original_order, (preset_name, preset) in enumerate(
+    presets.items()
+):
+    if preset.get("proto") in hidden_protocols:
+        continue
+
+    if preset.get("listen") == "127.0.0.1":
+        continue
+
+    ports = xray_public_ports(
+        preset_name,
+        preset,
+        accounts,
+        web_networks,
+        plain80_networks,
+    )
+
+    if ports == "80, 443":
+        priority = 0
+    elif ports == "443":
+        priority = 1
+    else:
+        priority = 2
+
+    xray_rows.append(
+        (
+            priority,
+            original_order,
+            preset.get("title", preset_name),
+            ports,
+        )
+    )
+
+for _, _, protocol_name, ports in sorted(xray_rows):
+    row(protocol_name, ports)
+
+section("ZIVPN SERVICES")
+row("ZIVPN UDP", "6000-19999")
+
+section("NOOBZVPN SERVICES")
+row("NoobzVPN Plain", "80")
+row("NoobzVPN TLS", "443")
+
+section("WIREGUARD SERVICES")
+row("WireGuard", wireguard_port())
+
+section("L2TP / IPSEC SERVICES")
+row("L2TP / IPSec", "500, 4500, 1701")
+row("IKEv2 / IPSec", "500, 4500")
+
+section("PSIPHON SERVICES")
+for protocol, port in psiphon_ports():
+    row(protocol, port)
+
+print()
+print("=" * LINE_WIDTH)
+print("Only public ports shown to clients".center(LINE_WIDTH))
+print("=" * LINE_WIDTH)
+
+if sys.stdin.isatty():
+    input("Press Enter to return...")

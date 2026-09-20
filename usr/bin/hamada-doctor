@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -u
+
+fail=0
+DOMAIN="$(cat /etc/hamada/domain 2>/dev/null || hostname -I | awk '{print $1}')"
+
+ok() { echo "OK $*"; }
+bad() { echo "[ERROR] $*"; fail=1; }
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 && ok "command: $1" || bad "missing command: $1"
+}
+
+need_active() {
+  systemctl is-active --quiet "$1" && ok "service active: $1" || bad "service not active: $1"
+}
+
+need_tcp() {
+  ss -H -ltn "( sport = :$1 )" 2>/dev/null | grep -q . && ok "tcp port: $1" || bad "tcp port not listening: $1"
+}
+
+need_udp() {
+  ss -H -lun "( sport = :$1 )" 2>/dev/null | grep -q . && ok "udp port: $1" || bad "udp port not listening: $1"
+}
+
+echo "===== HAMADA NET DOCTOR ====="
+
+for c in \
+  menu menu-ssh add-ssh del-ssh renew-ssh trial-ssh cek-ssh show-ssh \
+  menu-l2tp add-l2tp trial-l2tp renew-l2tp del-l2tp cek-l2tp show-l2tp hn-l2tp-sync \
+  menu-wg add-wg trial-wg renew-wg del-wg cek-wg show-wg hn-wg-sync \
+  menu-zivpn add-zivpn trial-zivpn renew-zivpn del-zivpn cek-zivpn show-zivpn hn-zivpn-sync hn-zivpn-ports \
+  xrayctl xray-menu add-xray trial-xray renew-xray del-xray show-xray list-xray xray-status xray-doctor xray-restart \
+  hamada-update hn-update hamada-wg-web-fix hamada-net-fix-network hamada-reset hamada-doctor
+do
+  need_cmd "$c"
+done
+
+for s in \
+  ssh dropbear nginx haproxy squid \
+  hamada-ssh-ws hamada-dropbear-ws hamada-openvpn-ws \
+  openvpn-server@server-tcp-1194 openvpn-server@server-udp-2200 \
+  strongswan-starter xl2tpd hamada-l2tp-firewall wg-quick@wg0 zivpn hamada-zivpn-firewall xray hamada-xray-firewall
+do
+  need_active "$s"
+done
+
+for p in 22 80 443 109 143 1194 3128 8080 444 777; do
+  need_tcp "$p"
+done
+
+for p in 2200 500 4500 1701 51820 5667; do
+  need_udp "$p"
+done
+
+echo "Domain: $DOMAIN"
+
+if [ "$fail" -eq 0 ]; then
+  echo "DOCTOR PASSED"
+else
+  echo "DOCTOR FAILED"
+fi
+
+exit "$fail"

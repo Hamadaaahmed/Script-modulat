@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+while true; do
+  clear
+  echo "============================================"
+  echo "             HAMADA NET L2TP MENU"
+  echo "============================================"
+  echo "[1] Create L2TP/IKEv2 Account"
+  echo "[2] Trial L2TP/IKEv2 Account"
+  echo "[3] Renew L2TP/IKEv2 Account"
+  echo "[4] Delete L2TP/IKEv2 Account"
+  echo "[5] Check L2TP/IKEv2 Logins"
+  echo "[6] Show L2TP/IKEv2 Accounts"
+  echo "[0] Back"
+  echo "============================================"
+  read -rp "Select option: " opt
+  case "$opt" in
+    1) add-l2tp ;;
+    2) trial-l2tp ;;
+    3) renew-l2tp ;;
+    4) del-l2tp ;;
+    5) cek-l2tp ;;
+    6) show-l2tp ;;
+    0) exit 0 ;;
+    *) echo "Invalid option"; sleep 1 ;;
+  esac
+done

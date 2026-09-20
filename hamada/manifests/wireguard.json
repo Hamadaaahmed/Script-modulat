@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "id": "wireguard",
+  "name": "WireGuard",
+  "version": "legacy-observed-1",
+  "description": "Legacy WireGuard VPN runtime.",
+  "dependencies": {
+    "modules": [],
+    "optional_modules": [],
+    "infrastructure": []
+  },
+  "conflicts": {
+    "modules": [],
+    "notes": []
+  },
+  "requirements": {
+    "packages": [],
+    "binaries": [
+      "wg",
+      "wg-quick"
+    ],
+    "certificate": false,
+    "edge": false
+  },
+  "paths": {
+    "config": [
+      "/etc/wireguard/wg0.conf"
+    ],
+    "data": [
+      "/etc/hamada/wg"
+    ],
+    "legacy": []
+  },
+  "services": [
+    {
+      "name": "wg-quick@wg0.service",
+      "ownership": "legacy"
+    }
+  ],
+  "ports": {
+    "public_tcp": [],
+    "public_udp": [
+      {
+        "port": 51820,
+        "purpose": "WireGuard"
+      }
+    ],
+    "internal_tcp": [],
+    "internal_udp": []
+  },
+  "firewall": {
+    "ownership": "legacy",
+    "requirements": [
+      "Legacy PostUp/PostDown firewall rules"
+    ]
+  },
+  "edge": {
+    "ownership": "none",
+    "routes": [],
+    "backends": []
+  },
+  "accounts": {
+    "supported": true,
+    "backend": "WireGuard peers + legacy config files",
+    "capabilities": [
+      "account_create",
+      "account_delete",
+      "account_renew",
+      "account_expire",
+      "account_list",
+      "account_status",
+      "account_reconcile"
+    ]
+  },
+  "healthchecks": [],
+  "lifecycle": [
+    "preflight",
+    "install",
+    "configure",
+    "validate",
+    "enable",
+    "start",
+    "verify",
+    "reconcile",
+    "migrate",
+    "uninstall"
+  ]
+}

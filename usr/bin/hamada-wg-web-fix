@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+rm -f /etc/nginx/conf.d/00-hamada-net-wg-files.conf 2>/dev/null || true
+mkdir -p /var/www/html/wg-files
+
+python3 - <<'PY'
+from pathlib import Path
+import re
+
+block = """
+    location ^~ /wg-files/ {
+        alias /var/www/html/wg-files/;
+        autoindex off;
+        default_type application/octet-stream;
+        add_header Content-Disposition "attachment";
+        try_files $uri =404;
+    }
+
+"""
+
+targets = []
+for root in [Path("/etc/nginx/conf.d"), Path("/etc/nginx/sites-enabled"), Path("/etc/nginx/sites-available")]:
+    if root.exists():
+        for p in root.iterdir():
+            if p.is_file():
+                s = p.read_text(errors="ignore")
+                if "location /ssh" in s or "proxy_pass http://127.0.0.1:10080" in s:
+                    targets.insert(0, p)
+                elif "HAMADA NGINX OK" in s:
+                    targets.append(p)
+
+p = targets[0] if targets else Path("/etc/nginx/conf.d/hamada-ssh.conf")
+
+if not p.exists():
+    print("WARN: active nginx route file not found yet; skipping /wg-files route injection for now")
+    raise SystemExit(0)
+
+s = p.read_text(errors="ignore")
+
+if "/wg-files/" not in s:
+    m = re.search(r'\n\s*location\s+/ssh\s*\{', s)
+    if m:
+        s = s[:m.start()] + "\n" + block + s[m.start():]
+    else:
+        brace = s.find("{")
+        if brace == -1:
+            print("WARN: no nginx server block found; skipping /wg-files route injection")
+            raise SystemExit(0)
+        s = s[:brace+1] + "\n" + block + s[brace+1:]
+
+    p.write_text(s)
+    print(f"Added /wg-files route to {p}")
+else:
+    print(f"/wg-files route already exists in {p}")
+PY
+
+chmod -R a+rX /var/www/html/wg-files 2>/dev/null || true
+
+if command -v nginx >/dev/null 2>&1; then
+  nginx -t && systemctl reload nginx || true
+fi

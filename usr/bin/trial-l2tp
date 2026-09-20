@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE="/etc/hamada/l2tp-accounts"
+DOMAIN="$(cat /etc/hamada/domain 2>/dev/null || hostname -I | awk '{print $1}')"
+PSK="$(cat /etc/hamada/l2tp-ipsec.psk 2>/dev/null || echo HAMADA-NET-PSK)"
+mkdir -p "$BASE"
+
+read -rp "Trial minutes: " MINUTES
+echo "$MINUTES" | grep -Eq '^[0-9]+$' || { echo "ERROR: minutes must be number"; exit 1; }
+[ "$MINUTES" -gt 0 ] || { echo "ERROR: minutes must be greater than 0"; exit 1; }
+
+username="trial$(openssl rand -hex 2)"
+password="$(openssl rand -hex 4)"
+expire="$(date -d "+1 days" +%Y-%m-%d)"
+expire_human="$(date -d "+${MINUTES} minutes" "+%Y-%m-%d %H:%M:%S")"
+expire_ts="$(date -d "+${MINUTES} minutes" +%s)"
+
+cat > "$BASE/$username.conf" <<EOFC
+username="$username"
+password="$password"
+expire="$expire"
+expire_ts="$expire_ts"
+trial_minutes="$MINUTES"
+domain="$DOMAIN"
+EOFC
+chmod 600 "$BASE/$username.conf"
+
+hn-l2tp-sync
+
+systemd-run --quiet --unit="hamada-trial-l2tp-${username}" --on-active="${MINUTES}m" \
+  bash -lc "rm -f '$BASE/${username}.conf'; hn-l2tp-sync >/dev/null 2>&1 || true"
+
+clear
+echo "============================================"
+echo "       HAMADA NET TRIAL VPN ACCOUNT"
+echo "============================================"
+echo "Username       : $username"
+echo "Password       : $password"
+echo "Minutes        : $MINUTES"
+echo "Expires        : $expire_human"
+echo "Host           : $DOMAIN"
+echo "============================================"
+echo "ANDROID - IKEv2/IPSec MSCHAPv2"
+echo "Protocol       : IKEv2/IPSec MSCHAPv2"
+echo "Server         : $DOMAIN"
+echo "Remote ID      : $DOMAIN"
+echo "Local ID       : leave blank"
+echo "Username       : $username"
+echo "Password       : $password"
+echo "CA Certificate : http://$DOMAIN/hamada-ca.crt"
+echo "============================================"
+echo "ROUTER - L2TP/IPSec PSK"
+echo "Protocol       : L2TP/IPSec PSK"
+echo "Server         : $DOMAIN"
+echo "IPSec PSK      : $PSK"
+echo "L2TP Secret    : leave blank"
+echo "Username       : $username"
+echo "Password       : $password"
+echo "============================================"
+read -rp "Press Enter to continue..."

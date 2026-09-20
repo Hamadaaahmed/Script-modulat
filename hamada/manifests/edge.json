@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "id": "edge",
+  "name": "Edge Services",
+  "version": "legacy-observed-1",
+  "description": "Observed HAProxy/Nginx edge ownership.",
+  "dependencies": {
+    "modules": [],
+    "optional_modules": [],
+    "infrastructure": [
+      "systemd"
+    ]
+  },
+  "conflicts": {
+    "modules": [],
+    "notes": []
+  },
+  "requirements": {
+    "packages": [
+      "haproxy",
+      "nginx"
+    ],
+    "binaries": [
+      "haproxy",
+      "nginx"
+    ],
+    "certificate": true,
+    "edge": false
+  },
+  "paths": {
+    "config": [
+      "/etc/haproxy/haproxy.cfg",
+      "/etc/nginx/nginx.conf"
+    ],
+    "data": [],
+    "legacy": []
+  },
+  "services": [
+    {
+      "name": "haproxy.service",
+      "ownership": "legacy"
+    },
+    {
+      "name": "nginx.service",
+      "ownership": "legacy"
+    }
+  ],
+  "ports": {
+    "public_tcp": [
+      {
+        "port": 80,
+        "purpose": "public HTTP multiplexer"
+      },
+      {
+        "port": 443,
+        "purpose": "public TLS multiplexer"
+      }
+    ],
+    "public_udp": [],
+    "internal_tcp": [
+      {
+        "port": 8088,
+        "purpose": "Nginx internal HTTP"
+      },
+      {
+        "port": 8089,
+        "purpose": "Nginx internal HTTP/2"
+      },
+      {
+        "port": 11443,
+        "purpose": "HAProxy internal TLS"
+      }
+    ],
+    "internal_udp": []
+  },
+  "firewall": {
+    "ownership": "none",
+    "requirements": []
+  },
+  "edge": {
+    "ownership": "none",
+    "routes": [],
+    "backends": []
+  },
+  "accounts": {
+    "supported": false,
+    "backend": null,
+    "capabilities": []
+  },
+  "healthchecks": [],
+  "lifecycle": [
+    "preflight",
+    "install",
+    "configure",
+    "validate",
+    "enable",
+    "start",
+    "verify",
+    "reconcile",
+    "migrate",
+    "uninstall"
+  ]
+}

@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ACC_DIR="/etc/hamada/zivpn-accounts"
+CONFIG="/etc/zivpn/config.json"
+mkdir -p "$ACC_DIR" /etc/zivpn
+
+python3 - <<'PY'
+import json, time, re
+from pathlib import Path
+
+acc_dir = Path("/etc/hamada/zivpn-accounts")
+config_path = Path("/etc/zivpn/config.json")
+now = int(time.time())
+
+passwords = []
+for f in sorted(acc_dir.glob("*.conf")):
+    data = {}
+    for line in f.read_text(errors="ignore").splitlines():
+        m = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)="?(.*?)"?$', line.strip())
+        if m:
+            data[m.group(1)] = m.group(2)
+    try:
+        exp = int(data.get("expire_epoch", "0"))
+    except:
+        exp = 0
+    pw = data.get("password", "")
+    if pw and exp >= now:
+        passwords.append(pw)
+
+if not passwords:
+    passwords = ["disabled"]
+
+cfg = {
+  "listen": ":5667",
+  "cert": "/etc/zivpn/zivpn.crt",
+  "key": "/etc/zivpn/zivpn.key",
+  "obfs": "zivpn",
+  "auth": {
+    "mode": "passwords",
+    "config": passwords
+  }
+}
+
+if config_path.exists():
+    try:
+        old = json.loads(config_path.read_text())
+        old.update(cfg)
+        cfg = old
+        cfg["auth"] = {"mode": "passwords", "config": passwords}
+    except Exception:
+        pass
+
+config_path.write_text(json.dumps(cfg, indent=2) + "\n")
+print(f"Synced ZIVPN passwords: {len(passwords)}")
+PY
+
+systemctl restart zivpn.service 2>/dev/null || true
+systemctl restart hamada-zivpn-firewall.service 2>/dev/null || true

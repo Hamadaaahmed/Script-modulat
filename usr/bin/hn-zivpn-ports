@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ACC_DIR="/etc/hamada/zivpn-accounts"
+mkdir -p "$ACC_DIR"
+
+python3 - <<'PY'
+from pathlib import Path
+import re
+
+ACC_DIR = Path("/etc/hamada/zivpn-accounts")
+START, END = 6000, 19999
+
+def read_conf(p):
+    d = {}
+    for line in p.read_text(errors="ignore").splitlines():
+        m = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)="?(.*?)"?$', line.strip())
+        if m:
+            d[m.group(1)] = m.group(2)
+    return d
+
+used = set()
+files = sorted(ACC_DIR.glob("*.conf"))
+
+for f in files:
+    d = read_conf(f)
+    port = d.get("port", "")
+    if port.isdigit():
+        used.add(int(port))
+
+next_port = START
+changed = False
+
+for f in files:
+    d = read_conf(f)
+    port = d.get("port", "")
+    if port.isdigit():
+        continue
+
+    while next_port in used and next_port <= END:
+        next_port += 1
+
+    if next_port > END:
+        raise SystemExit("ERROR: no ZIVPN ports available")
+
+    txt = f.read_text(errors="ignore")
+    if txt and not txt.endswith("\n"):
+        txt += "\n"
+    txt += f'port="{next_port}"\n'
+    f.write_text(txt)
+    used.add(next_port)
+    changed = True
+    print(f"Assigned port {next_port} to {f.name}")
+
+print("ZIVPN ports OK")
+PY

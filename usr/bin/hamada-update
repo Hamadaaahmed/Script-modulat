@@ -1,0 +1,276 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 022
+
+REPO_TARBALL_URL="${HAMADA_REPO_TARBALL_URL:-https://github.com/Hamadaaahmed/commercial-vps-autoscript/archive/refs/heads/main.tar.gz}"
+INSTALL_DIR="${HAMADA_DIR:-/root/commercial-vps-autoscript}"
+
+[ "$(id -u)" -eq 0 ] || {
+  echo "[ERROR] Run as root." >&2
+  exit 1
+}
+
+WORK_DIR="$(mktemp -d /root/hamada-update.XXXXXX)"
+ARCHIVE="$WORK_DIR/repo.tar.gz"
+NEW_DIR="$WORK_DIR/repo"
+BACKUP_DIR="$WORK_DIR/backup"
+SOURCE_BACKUP="$BACKUP_DIR/source"
+BIN_BACKUP="$BACKUP_DIR/usr-bin"
+TARGETS_FILE="$BACKUP_DIR/targets.list"
+
+SUCCESS=0
+UPDATED_COUNT=0
+ROLLBACK_NEEDED=0
+ROLLBACK_DONE=0
+SOURCE_BACKED_UP=0
+NEW_SOURCE_ACTIVE=0
+CORE_DEPLOYED=0
+
+green() {
+  echo "[OK] $*"
+}
+
+yellow() {
+  echo "[WARN] $*"
+}
+
+die() {
+  echo "[ERROR] $*" >&2
+  exit 1
+}
+
+rollback() {
+  [ "$ROLLBACK_NEEDED" -eq 1 ] || return 0
+  [ "$ROLLBACK_DONE" -eq 0 ] || return 0
+
+  ROLLBACK_DONE=1
+  set +e
+
+  echo
+  yellow "Update failed; restoring previous files..."
+
+  if [ -s "$TARGETS_FILE" ]; then
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      rm -f "/usr/bin/$name"
+    done < "$TARGETS_FILE"
+  fi
+
+  if [ -d "$BIN_BACKUP" ]; then
+    for old_file in "$BIN_BACKUP"/*; do
+      [ -e "$old_file" ] || [ -L "$old_file" ] || continue
+      cp -a "$old_file" "/usr/bin/$(basename "$old_file")"
+    done
+  fi
+
+  if [ "$CORE_DEPLOYED" -eq 1 ] && [ -x "$INSTALL_DIR/scripts/hamada-runtime-deploy" ]; then
+    python3 "$INSTALL_DIR/scripts/hamada-runtime-deploy" rollback --root /opt/hamada >/dev/null 2>&1 || \
+      yellow "Runtime Core rollback requires manual verification."
+  fi
+
+  if [ "$NEW_SOURCE_ACTIVE" -eq 1 ]; then
+    rm -rf "$INSTALL_DIR"
+  fi
+
+  if [ "$SOURCE_BACKED_UP" -eq 1 ] &&
+     { [ -e "$SOURCE_BACKUP" ] || [ -L "$SOURCE_BACKUP" ]; }; then
+    mv "$SOURCE_BACKUP" "$INSTALL_DIR"
+  fi
+
+  rm -f /usr/bin/hamada-cloudflare /usr/bin/menu-domain
+hash -r 2>/dev/null || true
+
+  yellow "Rollback completed."
+}
+
+cleanup() {
+  local rc=$?
+
+  trap - EXIT
+
+  if [ "$SUCCESS" -ne 1 ]; then
+    rollback
+  fi
+
+  if [ "$SUCCESS" -eq 1 ]; then
+    rm -rf "$WORK_DIR"
+  else
+    echo "[WARN] Diagnostic backup retained: $WORK_DIR"
+  fi
+
+  exit "$rc"
+}
+
+trap cleanup EXIT
+
+echo "============================================"
+echo "        HAMADA NET SAFE UPDATE"
+echo "============================================"
+echo "[INFO] Mode: files only"
+echo "[INFO] No package installation"
+echo "[INFO] No certificate changes"
+echo "[INFO] No service reconfiguration"
+echo
+
+mkdir -p "$NEW_DIR" "$BACKUP_DIR" "$BIN_BACKUP"
+
+echo "[01/05] Downloading repository package..."
+
+curl -4fsSL \
+  --retry 3 \
+  --retry-delay 2 \
+  --connect-timeout 15 \
+  "$REPO_TARBALL_URL" \
+  -o "$ARCHIVE"
+
+tar -tzf "$ARCHIVE" >/dev/null
+tar -xzf "$ARCHIVE" --strip-components=1 -C "$NEW_DIR"
+
+green "Repository package downloaded."
+
+echo
+echo "[02/05] Validating downloaded files..."
+
+[ -d "$NEW_DIR/usr/bin" ] ||
+  die "Downloaded repository has no usr/bin directory."
+
+for required in \
+  menu \
+  menu-settings \
+  hamada-update \
+  xrayctl
+do
+  [ -s "$NEW_DIR/usr/bin/$required" ] ||
+    die "Missing required file: usr/bin/$required"
+done
+
+shopt -s nullglob
+source_files=("$NEW_DIR/usr/bin"/*)
+shopt -u nullglob
+
+[ "${#source_files[@]}" -gt 0 ] ||
+  die "No command files were found."
+
+for source_file in "${source_files[@]}"; do
+  [ -f "$source_file" ] || continue
+  [ -s "$source_file" ] ||
+    die "Empty command file: $source_file"
+
+  first_line="$(head -n 1 "$source_file" || true)"
+
+  case "$first_line" in
+    *bash*|*"/sh")
+      bash -n "$source_file"
+      ;;
+
+    *python*)
+      python3 - "$source_file" <<'PYCOMPILE'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+compile(path.read_text(), str(path), "exec")
+PYCOMPILE
+      ;;
+  esac
+done
+
+green "Downloaded command files passed validation."
+
+echo
+echo "[03/05] Creating rollback backup..."
+
+for source_file in "${source_files[@]}"; do
+  [ -f "$source_file" ] || continue
+
+  name="$(basename "$source_file")"
+  printf '%s\n' "$name" >> "$TARGETS_FILE"
+
+  if [ -e "/usr/bin/$name" ] || [ -L "/usr/bin/$name" ]; then
+    cp -a "/usr/bin/$name" "$BIN_BACKUP/$name"
+  fi
+done
+
+ROLLBACK_NEEDED=1
+
+if [ -e "$INSTALL_DIR" ] || [ -L "$INSTALL_DIR" ]; then
+  mv "$INSTALL_DIR" "$SOURCE_BACKUP"
+  SOURCE_BACKED_UP=1
+fi
+
+green "Rollback backup created."
+
+echo
+echo "[04/05] Installing updated source and commands..."
+
+mv "$NEW_DIR" "$INSTALL_DIR"
+NEW_SOURCE_ACTIVE=1
+
+[ -x "$INSTALL_DIR/scripts/hamada-runtime-deploy" ] ||
+  die "Runtime Core deployer is missing."
+python3 "$INSTALL_DIR/scripts/hamada-runtime-deploy" deploy --source "$INSTALL_DIR" --root /opt/hamada
+CORE_DEPLOYED=1
+
+while IFS= read -r name; do
+  [ -n "$name" ] || continue
+
+  source_file="$INSTALL_DIR/usr/bin/$name"
+  target_file="/usr/bin/$name"
+
+  [ -s "$source_file" ] ||
+    die "Missing source after activation: $source_file"
+
+  if [ "$name" = "renew-ssh" ]; then
+    install -m 0755 "$source_file" /usr/bin/.renew-ssh.hamada-new
+    mv -f /usr/bin/.renew-ssh.hamada-new "$target_file"
+  else
+    install -m 0755 "$source_file" "$target_file"
+  fi
+
+  cmp -s "$source_file" "$target_file" ||
+    die "Installed file verification failed: $target_file"
+
+  UPDATED_COUNT=$((UPDATED_COUNT + 1))
+done < "$TARGETS_FILE"
+
+rm -f /usr/bin/hamada-cloudflare /usr/bin/menu-domain
+hash -r 2>/dev/null || true
+
+green "$UPDATED_COUNT command files installed."
+
+echo
+echo "[05/05] Final verification..."
+
+for required in \
+  menu \
+  menu-settings \
+  hamada-update \
+  xrayctl
+do
+  [ -s "/usr/bin/$required" ] ||
+    die "Installed required file is missing: /usr/bin/$required"
+done
+
+bash -n /usr/bin/hamada-update
+
+python3 - /usr/bin/xrayctl <<'PYCOMPILE'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+compile(path.read_text(), str(path), "exec")
+PYCOMPILE
+
+PYTHONPATH=/opt/hamada/current python3 -m hamada.runtime.cli runtime-check --root /opt/hamada ||
+  die "Runtime Core post-update verification failed."
+
+SUCCESS=1
+ROLLBACK_NEEDED=0
+
+echo
+echo "============================================"
+echo "[OK] File-only update completed safely."
+echo "[OK] Installed commands: $UPDATED_COUNT"
+echo "[OK] Services and certificates were untouched."
+echo "Run: menu"
+echo "============================================"

@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "id": "openvpn",
+  "name": "OpenVPN",
+  "version": "legacy-observed-1",
+  "description": "OpenVPN TCP, UDP and WebSocket legacy runtime.",
+  "dependencies": {
+    "modules": [
+      "edge"
+    ],
+    "optional_modules": [],
+    "infrastructure": []
+  },
+  "conflicts": {
+    "modules": [],
+    "notes": []
+  },
+  "requirements": {
+    "packages": [
+      "openvpn"
+    ],
+    "binaries": [
+      "openvpn"
+    ],
+    "certificate": false,
+    "edge": true
+  },
+  "paths": {
+    "config": [
+      "/etc/openvpn/server/server-tcp-1194.conf",
+      "/etc/openvpn/server/server-udp-2200.conf"
+    ],
+    "data": [],
+    "legacy": []
+  },
+  "services": [
+    {
+      "name": "openvpn-server@server-tcp-1194.service",
+      "ownership": "legacy"
+    },
+    {
+      "name": "openvpn-server@server-udp-2200.service",
+      "ownership": "legacy"
+    },
+    {
+      "name": "hamada-openvpn-ws.service",
+      "ownership": "legacy"
+    }
+  ],
+  "ports": {
+    "public_tcp": [
+      {
+        "port": 1194,
+        "purpose": "OpenVPN TCP"
+      }
+    ],
+    "public_udp": [
+      {
+        "port": 2200,
+        "purpose": "OpenVPN UDP"
+      }
+    ],
+    "internal_tcp": [
+      {
+        "port": 10082,
+        "purpose": "OpenVPN WebSocket bridge"
+      }
+    ],
+    "internal_udp": []
+  },
+  "firewall": {
+    "ownership": "legacy",
+    "requirements": [
+      "NAT/forwarding rules are legacy-owned"
+    ]
+  },
+  "edge": {
+    "ownership": "none",
+    "routes": [],
+    "backends": []
+  },
+  "accounts": {
+    "supported": false,
+    "backend": null,
+    "capabilities": []
+  },
+  "healthchecks": [],
+  "lifecycle": [
+    "preflight",
+    "install",
+    "configure",
+    "validate",
+    "enable",
+    "start",
+    "verify",
+    "reconcile",
+    "migrate",
+    "uninstall"
+  ]
+}

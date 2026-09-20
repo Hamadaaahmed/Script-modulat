@@ -1,0 +1,76 @@
+#!/bin/bash
+set -euo pipefail
+
+echo "HAMADA RESET TOOL"
+echo "This command removes files and services created by hamada autoscript only."
+echo
+read -rp "Type RESET to continue: " confirm
+if [ "$confirm" != "RESET" ]; then
+  echo "Cancelled."
+  exit 0
+fi
+
+echo "Stopping known services..."
+
+for svc in \
+  hamada-ssh-ws.service \
+  hamada-dropbear-ws.service \
+  hamada-openvpn-ws.service \
+  openvpn-server@server-tcp-1194.service \
+  openvpn-server@server-udp-2200.service \
+  dropbear haproxy stunnel4 squid nginx \
+  noobzvpns.service zivpn.service xray-vlessgrpc.service trojan-grpc.service xray-tcp.service \
+  xl2tpd strongswan strongswan-starter hamada-l2tp-firewall.service wg-quick@wg0 hamada-zivpn-firewall.service hamada-net-firewall.service
+do
+  systemctl stop "$svc" 2>/dev/null || true
+  systemctl disable "$svc" 2>/dev/null || true
+done
+
+echo "Removing hamada files..."
+
+rm -rf /usr/local/hamada
+rm -rf /etc/hamada
+rm -rf /var/www/html/vpn-files
+rm -rf /var/www/html/wg-files
+rm -rf /etc/zivpn
+rm -rf /etc/wireguard
+rm -f /usr/local/sbin/hamada-l2tp-firewall
+rm -f /etc/systemd/system/hamada-l2tp-firewall.service
+rm -f /etc/cron.d/hamada-net-l2tp-expire
+rm -f /etc/sysctl.d/99-hamada-net-l2tp.conf
+
+rm -f /etc/nginx/conf.d/hamada-ssh.conf
+rm -f /etc/stunnel/hamada.conf
+rm -f /etc/haproxy/haproxy.cfg
+[ -f /etc/haproxy/haproxy.cfg.hamada.bak ] && cp -f /etc/haproxy/haproxy.cfg.hamada.bak /etc/haproxy/haproxy.cfg || true
+rm -f /etc/systemd/system/hamada-ssh-ws.service
+rm -f /etc/systemd/system/hamada-dropbear-ws.service
+rm -f /etc/systemd/system/hamada-openvpn-ws.service
+
+rm -f /etc/openvpn/server/server-tcp-1194.conf
+rm -f /etc/openvpn/server/server-udp-2200.conf
+rm -f /etc/systemd/system/noobzvpns.service
+rm -f /etc/systemd/system/zivpn.service
+rm -f /etc/systemd/system/hamada-zivpn-firewall.service
+rm -f /etc/systemd/system/hamada-net-firewall.service
+rm -f /etc/systemd/system/xray-vlessgrpc.service
+rm -f /etc/systemd/system/trojan-grpc.service
+rm -f /etc/systemd/system/xray-tcp.service
+
+rm -f /usr/bin/menu
+rm -f /usr/bin/menu-*
+rm -f /usr/bin/add-*
+rm -f /usr/bin/del-*
+rm -f /usr/bin/renew-*
+rm -f /usr/bin/cek-*
+rm -f /usr/bin/trial-*
+rm -f /usr/bin/install-*
+rm -f /usr/bin/hamada-doctor
+rm -f /usr/bin/hn-*
+rm -f /usr/bin/hamada-*
+rm -f /usr/bin/change-v2ray-credentials
+rm -f /usr/bin/hamada-reset
+
+systemctl daemon-reload 2>/dev/null || true
+
+echo "Reset completed."

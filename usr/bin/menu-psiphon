@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -t 1 ]; then
+  GREEN="$(printf '\033[32m')"
+  YELLOW="$(printf '\033[33m')"
+  CYAN="$(printf '\033[36m')"
+  BOLD="$(printf '\033[1m')"
+  DIM="$(printf '\033[2m')"
+  RESET="$(printf '\033[0m')"
+else
+  GREEN=""; YELLOW=""; CYAN=""; BOLD=""; DIM=""; RESET=""
+fi
+
+DOMAIN="$(cat /etc/hamada/domain 2>/dev/null || hostname -f 2>/dev/null || hostname)"
+PSIPHON_DIR="/etc/hamada/psiphon"
+EXPORT_DIR="/root/psiphon"
+ENTRY_FILE="$EXPORT_DIR/server-entry.dat"
+AUTH_FILE="$EXPORT_DIR/authorizations.json"
+GUIDE_FILE="$EXPORT_DIR/HTTP-CUSTOM-PSIPHON.txt"
+LINE="======================================================"
+
+line() {
+  printf "%b%s%b\n" "$DIM" "$LINE" "$RESET"
+}
+
+pause_menu() {
+  echo
+  read -rp "Press Enter to continue..." _
+}
+
+header() {
+  clear || true
+  line
+  printf "%b%*s%b\n" "$BOLD$CYAN" 36 "REAL PSIPHON SERVER" "$RESET"
+  line
+  printf "%bDomain:%b %s\n" "$BOLD" "$RESET" "$DOMAIN"
+  line
+}
+
+need_entry() {
+  if [ ! -s "$ENTRY_FILE" ]; then
+    echo "server-entry.dat not found."
+    echo "Run option [5] Install / Regenerate Psiphon Server"
+    return 1
+  fi
+}
+
+show_http_custom() {
+  header
+  need_entry || return 0
+
+  cat <<INFO
+${GREEN}HTTP Custom Psiphon Settings${RESET}
+
+Enable Psiphon: ON
+
+Protocol:
+  ALL
+or:
+  SSH
+  OSSH
+  QUIC
+  UNFRONTED MEEK
+  UNFRONTED MEEK-HTTPS
+
+Regions:
+  Best performance
+
+Authorizations:
+  []
+
+Remote Proxy examples:
+  speedtest.net.${DOMAIN}:80
+  speedtest.net.${DOMAIN}:443
+  speedtest.net.${DOMAIN}:8080
+
+TargetServerEntry:
+$(cat "$ENTRY_FILE")
+
+INFO
+}
+
+show_entry_only() {
+  header
+  need_entry || return 0
+  cat "$ENTRY_FILE"
+  echo
+}
+
+show_auth() {
+  header
+  if [ -s "$AUTH_FILE" ]; then
+    cat "$AUTH_FILE"
+  else
+    echo "[]"
+  fi
+}
+
+show_files() {
+  header
+  cat <<INFO
+Files:
+
+TargetServerEntry:
+  $ENTRY_FILE
+
+Authorizations:
+  $AUTH_FILE
+
+Full HTTP Custom guide:
+  $GUIDE_FILE
+
+Client config:
+  $EXPORT_DIR/client.config
+
+Ports:
+  SSH                    TCP 10990
+  OSSH                   TCP 10991
+  UNFRONTED MEEK         TCP 10992
+  UNFRONTED MEEK-HTTPS   TCP 10993
+  QUIC                   UDP 10994
+INFO
+}
+
+status_psiphon() {
+  header
+  systemctl status hamada-psiphon --no-pager -l 2>/dev/null || true
+  echo
+  ss -lntup 2>/dev/null | grep -E ':(10990|10991|10992|10993|10994)\b|psiphond' || true
+}
+
+install_psiphon() {
+  header
+  local installer=""
+
+  if [ -x /usr/local/hamada/bin/psiphon-server.sh ]; then
+    installer="/usr/local/hamada/bin/psiphon-server.sh"
+  elif [ -x /root/commercial-vps-autoscript/install/services/psiphon-server.sh ]; then
+    installer="/root/commercial-vps-autoscript/install/services/psiphon-server.sh"
+  else
+    echo "Installer not found."
+    return 1
+  fi
+
+  PSIPHON_FORCE_REGEN=1 bash "$installer" "$DOMAIN"
+}
+
+while true; do
+  header
+  printf "%b[1]%b Show HTTP Custom Psiphon settings\n" "$BOLD$CYAN" "$RESET"
+  printf "%b[2]%b Show TargetServerEntry only\n" "$BOLD$CYAN" "$RESET"
+  printf "%b[3]%b Show Authorizations JSON\n" "$BOLD$CYAN" "$RESET"
+  printf "%b[4]%b Show files and ports\n" "$BOLD$CYAN" "$RESET"
+  printf "%b[5]%b Install / Regenerate Psiphon Server\n" "$BOLD$CYAN" "$RESET"
+  printf "%b[6]%b Psiphon service status\n" "$BOLD$CYAN" "$RESET"
+  printf "%b[0]%b Back\n" "$BOLD$CYAN" "$RESET"
+  line
+  read -rp "Select Menu : " opt
+
+  case "$opt" in
+    1) show_http_custom; pause_menu ;;
+    2) show_entry_only; pause_menu ;;
+    3) show_auth; pause_menu ;;
+    4) show_files; pause_menu ;;
+    5) install_psiphon; pause_menu ;;
+    6) status_psiphon; pause_menu ;;
+    0) clear || true; exit 0 ;;
+    *) echo "Invalid option"; sleep 1 ;;
+  esac
+done

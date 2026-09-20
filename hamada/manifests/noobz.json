@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "id": "noobz",
+  "name": "NoobzVPN",
+  "version": "legacy-observed-1",
+  "description": "Legacy NoobzVPN server behind HAProxy.",
+  "dependencies": {
+    "modules": [
+      "edge"
+    ],
+    "optional_modules": [],
+    "infrastructure": []
+  },
+  "conflicts": {
+    "modules": [],
+    "notes": []
+  },
+  "requirements": {
+    "packages": [],
+    "binaries": [
+      "noobzvpns"
+    ],
+    "certificate": false,
+    "edge": true
+  },
+  "paths": {
+    "config": [],
+    "data": [],
+    "legacy": []
+  },
+  "services": [
+    {
+      "name": "noobzvpns.service",
+      "ownership": "legacy"
+    }
+  ],
+  "ports": {
+    "public_tcp": [],
+    "public_udp": [],
+    "internal_tcp": [
+      {
+        "port": 10090,
+        "purpose": "Noobz internal"
+      },
+      {
+        "port": 10091,
+        "purpose": "Noobz internal SSL"
+      }
+    ],
+    "internal_udp": []
+  },
+  "firewall": {
+    "ownership": "none",
+    "requirements": []
+  },
+  "edge": {
+    "ownership": "none",
+    "routes": [],
+    "backends": []
+  },
+  "accounts": {
+    "supported": true,
+    "backend": "NoobzVPN upstream database",
+    "capabilities": [
+      "account_create",
+      "account_delete",
+      "account_renew",
+      "account_expire",
+      "account_list",
+      "account_status",
+      "account_reconcile"
+    ]
+  },
+  "healthchecks": [],
+  "lifecycle": [
+    "preflight",
+    "install",
+    "configure",
+    "validate",
+    "enable",
+    "start",
+    "verify",
+    "reconcile",
+    "migrate",
+    "uninstall"
+  ]
+}

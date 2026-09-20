@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+while true; do
+  clear
+  echo "============================================"
+  echo "              HAMADA NET SLOWDNS"
+  echo "============================================"
+  echo "[1] Show SlowDNS Info"
+  echo "[2] Restart SlowDNS"
+  echo "[3] SlowDNS Status"
+  echo "[4] Show DNS Records Help"
+  echo "[0] Back"
+  echo "============================================"
+  read -rp "Select Menu : " opt
+
+  case "$opt" in
+    1)
+      clear
+      if [ -s /etc/hamada/slowdns/info.txt ]; then
+        cat /etc/hamada/slowdns/info.txt
+      else
+        echo "SlowDNS is not installed yet."
+      fi
+      echo
+      read -rp "Press Enter to continue..."
+      ;;
+    2)
+      systemctl restart hamada-slowdns-mux hamada-slowdns
+      echo "[OK] SlowDNS restarted."
+      sleep 1
+      ;;
+    3)
+      systemctl --no-pager --full status hamada-slowdns-mux hamada-slowdns || true
+      echo
+      ss -lntup | grep -E ':(53|109|443|53001)\b|dnstt-server|haproxy|xray|dropbear' || true
+      echo
+      read -rp "Press Enter to continue..."
+      ;;
+    4)
+      DOMAIN="$(cat /etc/hamada/domain 2>/dev/null || cat /root/domain 2>/dev/null || echo 'your-domain.com')"
+      SLOWDNS_DOMAIN="$(cat /etc/hamada/slowdns-domain 2>/dev/null || echo "ns-${DOMAIN%%.*}.${DOMAIN#*.}")"
+      SLOWDNS_NS_HOST="$(cat /etc/hamada/slowdns-ns-host 2>/dev/null || echo "${DOMAIN}")"
+      IP="$(curl -4fsS https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
+      clear
+      echo "Cloudflare DNS only:"
+      echo
+      echo "A    ${SLOWDNS_NS_HOST}  -> ${IP}"
+      echo "NS   ${SLOWDNS_DOMAIN}   -> ${SLOWDNS_NS_HOST}"
+      echo
+      echo "HTTP Custom Xray:"
+      echo "Enable DNS : ON"
+      echo "SlowDNS    : ON"
+      echo "V2Ray      : ON"
+      echo "SSH        : OFF"
+      echo "UDPGW      : OFF"
+      echo "V2Ray Link : VLESS WS TLS 443 recommended"
+      echo
+      echo "HTTP Custom SSH:"
+      echo "Enable DNS : ON"
+      echo "SlowDNS    : ON"
+      echo "SSH        : ON"
+      echo "V2Ray      : OFF"
+      echo "UDPGW      : OFF"
+      echo "SSH Port   : 109"
+      echo
+      echo "DNS        : 8.8.8.8 or 1.1.1.1"
+      echo "Nameserver : ${SLOWDNS_DOMAIN}"
+      echo "NS Host    : ${SLOWDNS_NS_HOST}"
+      echo "Public Key : menu option [1]"
+      echo
+      read -rp "Press Enter to continue..."
+      ;;
+    0) exit 0 ;;
+    *) echo "Invalid option"; sleep 1 ;;
+  esac
+done

@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "id": "ssh",
+  "name": "SSH Core + Legacy SSH Stack Observation",
+  "version": "2.5-partial",
+  "description": "Phase 2.5 installs a versioned SSH Core runtime and cuts over renew-ssh through a compatibility wrapper; all other SSH stack/runtime ownership remains legacy.",
+  "dependencies": {
+    "modules": [
+      "edge"
+    ],
+    "optional_modules": [],
+    "infrastructure": []
+  },
+  "conflicts": {
+    "modules": [],
+    "notes": []
+  },
+  "requirements": {
+    "packages": [
+      "openssh-server",
+      "dropbear",
+      "stunnel4"
+    ],
+    "binaries": [
+      "sshd",
+      "dropbear",
+      "stunnel4"
+    ],
+    "certificate": true,
+    "edge": true
+  },
+  "paths": {
+    "config": [
+      "/etc/ssh/sshd_config",
+      "/etc/default/dropbear",
+      "/etc/stunnel/stunnel.conf"
+    ],
+    "data": [
+      "/etc/hamada/ssh-accounts"
+    ],
+    "legacy": []
+  },
+  "services": [
+    {
+      "name": "ssh.service",
+      "ownership": "legacy"
+    },
+    {
+      "name": "dropbear.service",
+      "ownership": "legacy"
+    },
+    {
+      "name": "stunnel4.service",
+      "ownership": "legacy"
+    },
+    {
+      "name": "hamada-ssh-ws.service",
+      "ownership": "legacy"
+    },
+    {
+      "name": "hamada-dropbear-ws.service",
+      "ownership": "legacy"
+    }
+  ],
+  "ports": {
+    "public_tcp": [
+      {
+        "port": 22,
+        "purpose": "OpenSSH"
+      },
+      {
+        "port": 109,
+        "purpose": "Dropbear"
+      },
+      {
+        "port": 143,
+        "purpose": "Dropbear"
+      },
+      {
+        "port": 444,
+        "purpose": "Stunnel to SSH"
+      },
+      {
+        "port": 777,
+        "purpose": "Stunnel to Dropbear"
+      }
+    ],
+    "public_udp": [],
+    "internal_tcp": [
+      {
+        "port": 10080,
+        "purpose": "SSH WebSocket bridge"
+      },
+      {
+        "port": 10081,
+        "purpose": "Dropbear WebSocket bridge"
+      }
+    ],
+    "internal_udp": []
+  },
+  "firewall": {
+    "ownership": "none",
+    "requirements": []
+  },
+  "edge": {
+    "ownership": "none",
+    "routes": [],
+    "backends": []
+  },
+  "accounts": {
+    "supported": true,
+    "backend": "linux-users + /etc/hamada/ssh-accounts",
+    "capabilities": [
+      "account_create",
+      "account_delete",
+      "account_renew",
+      "account_expire",
+      "account_list",
+      "account_status",
+      "account_reconcile"
+    ]
+  },
+  "healthchecks": [
+    {
+      "type": "binary_exists",
+      "target": "sshd"
+    },
+    {
+      "type": "file_exists",
+      "target": "/etc/ssh/sshd_config"
+    },
+    {
+      "type": "file_exists",
+      "target": "/etc/hamada/ssh-accounts"
+    }
+  ],
+  "lifecycle": [
+    "preflight",
+    "install",
+    "configure",
+    "validate",
+    "enable",
+    "start",
+    "verify",
+    "reconcile",
+    "migrate",
+    "uninstall"
+  ],
+  "migration": {
+    "status": "partial",
+    "migrated_ownership": [
+      "Versioned HAMADA Python Core runtime deployment under /opt/hamada",
+      "renew-ssh public command uses SSH Core after runtime preflight",
+      "safe legacy SSH metadata parser/writer",
+      "OpenSSH read-only health foundation"
+    ],
+    "legacy_ownership": [
+      "OpenSSH runtime configuration/install flow",
+      "add-ssh",
+      "trial-ssh",
+      "del-ssh",
+      "cek-ssh",
+      "show-ssh",
+      "menu-ssh presentation dispatcher",
+      "Dropbear",
+      "Stunnel",
+      "SSH WebSocket bridge",
+      "Dropbear WebSocket bridge",
+      "OpenVPN integration/payload presentation",
+      "SlowDNS presentation",
+      "UDP Custom presentation"
+    ],
+    "compatibility": [
+      "Linux users remain account backend",
+      "/etc/hamada/ssh-accounts remains metadata backend",
+      "renew-ssh preserves legacy interactive semantics and has explicit pre-mutation legacy fallback",
+      "legacy renew implementation is retained at source legacy/usr/bin/renew-ssh and deployed to /opt/hamada/legacy/renew-ssh",
+      "no automatic fallback occurs after Core renew mutation begins"
+    ]
+  }
+}

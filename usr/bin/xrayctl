@@ -1,0 +1,2038 @@
+#!/usr/bin/env python3
+import argparse
+import base64
+import datetime as dt
+import hashlib
+import ipaddress
+import json
+import os
+import re
+import secrets
+import shutil
+import socket
+import subprocess
+import sys
+import uuid
+from pathlib import Path
+from urllib.parse import quote
+
+XRAY_HOME = Path("/etc/hamada/xray")
+XRAY_CONF_DIR = Path("/usr/local/etc/xray")
+XRAY_CONF = XRAY_CONF_DIR / "config.json"
+ACCOUNTS = XRAY_HOME / "accounts.json"
+ENV_FILE = XRAY_HOME / "defaults.env"
+SHADOWSOCKS_JSON_DIR = Path("/var/www/html/payloads/xray-configs")
+
+PRESETS = {
+    "vless-tcp-tls": {"title": "VLESS TCP TLS", "proto": "vless", "base": 8443, "net": "tcp", "sec": "tls"},
+    "vless-tcp-reality": {"title": "VLESS TCP REALITY", "proto": "vless", "base": 8444, "net": "tcp", "sec": "reality"},
+    "vless-vision-tls": {"title": "VLESS XTLS Vision TLS", "proto": "vless", "base": 8445, "net": "tcp", "sec": "tls", "flow": "xtls-rprx-vision"},
+    "vless-vision-reality": {"title": "VLESS XTLS Vision REALITY", "proto": "vless", "base": 8446, "net": "tcp", "sec": "reality", "flow": "xtls-rprx-vision"},
+    "vless-ws-tls": {"title": "VLESS WebSocket TLS", "proto": "vless", "base": 8447, "net": "ws", "sec": "tls", "path": "/vless-ws"},
+    "vless-grpc-tls": {"title": "VLESS gRPC TLS", "proto": "vless", "base": 8448, "net": "grpc", "sec": "tls", "service": "vless-grpc"},
+    "vless-xhttp-tls": {"title": "VLESS XHTTP TLS", "proto": "vless", "base": 8449, "net": "xhttp", "sec": "tls", "path": "/vless-xhttp"},
+    "vless-xhttp-reality": {"title": "VLESS XHTTP REALITY", "proto": "vless", "base": 8450, "net": "xhttp", "sec": "reality", "path": "/vless-xhttp"},
+    "vless-httpupgrade-tls": {"title": "VLESS HTTPUpgrade TLS", "proto": "vless", "base": 8451, "net": "httpupgrade", "sec": "tls", "path": "/vless-hu"},
+    "vless-mkcp": {"title": "VLESS mKCP", "proto": "vless", "base": 443, "net": "kcp", "sec": "none", "udp": True},
+
+    "vmess-tcp": {"title": "VMess TCP", "proto": "vmess", "base": 8453, "net": "tcp", "sec": "none"},
+    "vmess-tcp-tls": {"title": "VMess TCP TLS", "proto": "vmess", "base": 8454, "net": "tcp", "sec": "tls"},
+    "vmess-ws-tls": {"title": "VMess WebSocket TLS", "proto": "vmess", "base": 8455, "net": "ws", "sec": "tls", "path": "/vmess-ws"},
+    "vmess-grpc-tls": {"title": "VMess gRPC TLS", "proto": "vmess", "base": 8456, "net": "grpc", "sec": "tls", "service": "vmess-grpc"},
+    "vmess-xhttp-tls": {"title": "VMess XHTTP TLS", "proto": "vmess", "base": 8457, "net": "xhttp", "sec": "tls", "path": "/vmess-xhttp"},
+    "vmess-httpupgrade-tls": {"title": "VMess HTTPUpgrade TLS", "proto": "vmess", "base": 8458, "net": "httpupgrade", "sec": "tls", "path": "/vmess-hu"},
+    "vmess-mkcp": {"title": "VMess mKCP", "proto": "vmess", "base": 8459, "net": "kcp", "sec": "none", "udp": True},
+
+    "trojan-tcp-tls": {"title": "Trojan TCP TLS", "proto": "trojan", "base": 8460, "net": "tcp", "sec": "tls"},
+    "trojan-ws-tls": {"title": "Trojan WebSocket TLS", "proto": "trojan", "base": 8461, "net": "ws", "sec": "tls", "path": "/trojan-ws"},
+    "trojangrpc-tls": {"title": "Trojan gRPC TLS", "proto": "trojan", "base": 8462, "net": "grpc", "sec": "tls", "service": "trojangrpc"},
+    "trojan-xhttp-tls": {"title": "Trojan XHTTP TLS", "proto": "trojan", "base": 8463, "net": "xhttp", "sec": "tls", "path": "/trojan-xhttp"},
+    "trojan-httpupgrade-tls": {"title": "Trojan HTTPUpgrade TLS", "proto": "trojan", "base": 8464, "net": "httpupgrade", "sec": "tls", "path": "/trojan-hu"},
+
+    "ss-tcp": {"title": "Shadowsocks TCP/UDP", "proto": "shadowsocks", "base": 8465, "net": "tcp", "sec": "none", "method": "2022-blake3-aes-256-gcm"},
+    "ss-tcp-tls": {"title": "Shadowsocks TCP TLS", "proto": "shadowsocks", "base": 8466, "net": "tcp", "sec": "tls", "method": "2022-blake3-aes-256-gcm"},
+    "ss-ws-tls": {"title": "Shadowsocks WebSocket TLS", "proto": "shadowsocks", "base": 8467, "net": "ws", "sec": "tls", "path": "/ss-ws", "method": "2022-blake3-aes-256-gcm"},
+    "ss-grpc-tls": {"title": "Shadowsocks gRPC TLS", "proto": "shadowsocks", "base": 8468, "net": "grpc", "sec": "tls", "service": "ss-grpc", "method": "2022-blake3-aes-256-gcm"},
+    "socks-local": {"title": "SOCKS local", "proto": "socks", "base": 10808, "net": "tcp", "sec": "none", "listen": "127.0.0.1"},
+    "http-local": {"title": "HTTP local", "proto": "http", "base": 10809, "net": "tcp", "sec": "none", "listen": "127.0.0.1"},
+    "dokodemo-door": {"title": "Dokodemo-door TCP/UDP forward", "proto": "dokodemo-door", "base": 8490, "net": "tcp", "sec": "none", "dynamic": True},
+}
+
+def run(cmd, check=False, quiet=False):
+    kwargs = {"shell": True, "text": True}
+    if quiet:
+        kwargs["stdout"] = subprocess.PIPE
+        kwargs["stderr"] = subprocess.STDOUT
+    p = subprocess.run(cmd, **kwargs)
+    if check and p.returncode != 0:
+        out = getattr(p, "stdout", "") or ""
+        if out:
+            print(out)
+        raise SystemExit(p.returncode)
+    return p
+
+def die(msg, code=1):
+    print(f"ERROR: {msg}", file=sys.stderr)
+    raise SystemExit(code)
+
+def ensure_dirs():
+    XRAY_HOME.mkdir(parents=True, exist_ok=True)
+    XRAY_CONF_DIR.mkdir(parents=True, exist_ok=True)
+    (XRAY_HOME / "certs").mkdir(parents=True, exist_ok=True)
+    Path("/var/log/xray").mkdir(parents=True, exist_ok=True)
+
+def load_env():
+    env = {}
+    if ENV_FILE.exists():
+        for line in ENV_FILE.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            env[k] = v.strip().strip('"')
+    return env
+
+def save_env(env):
+    ensure_dirs()
+    ENV_FILE.write_text("".join(f'{k}="{str(v).replace(chr(34), "")}"\n' for k, v in sorted(env.items())))
+    os.chmod(ENV_FILE, 0o600)
+
+def load_accounts():
+    if not ACCOUNTS.exists():
+        return []
+    try:
+        data = json.loads(ACCOUNTS.read_text())
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+def save_accounts(items):
+    ensure_dirs()
+    tmp = ACCOUNTS.with_suffix(".tmp")
+    tmp.write_text(json.dumps(items, indent=2, sort_keys=True))
+    tmp.replace(ACCOUNTS)
+    os.chmod(ACCOUNTS, 0o600)
+
+def now_date():
+    return dt.date.today()
+
+def expiry(days):
+    return (now_date() + dt.timedelta(days=int(days))).isoformat()
+
+def is_active(acc):
+    try:
+        return dt.date.fromisoformat(acc.get("expires", "1970-01-01")) >= now_date()
+    except ValueError:
+        return False
+
+def default_domain():
+    for f in ["/etc/hamada/domain", "/etc/hamada/domain"]:
+        p = Path(f)
+        if p.exists() and p.read_text().strip():
+            return p.read_text().strip()
+    return socket.getfqdn() or socket.gethostname()
+
+def find_tls(domain):
+    candidates = [
+        ("/etc/hamada/xray/certs/xray.crt", "/etc/hamada/xray/certs/xray.key"),
+        (f"/etc/letsencrypt/live/{domain}/fullchain.pem", f"/etc/letsencrypt/live/{domain}/privkey.pem"),
+        ("/etc/hamada/certs/fullchain.pem", "/etc/hamada/certs/privkey.pem"),
+        ("/etc/hamada/certs/server.crt", "/etc/hamada/certs/server.key"),
+        ("/etc/ssl/certs/ssl-cert-snakeoil.pem", "/etc/ssl/private/ssl-cert-snakeoil.key"),
+    ]
+    for cert, key in candidates:
+        if Path(cert).exists() and Path(key).exists():
+            return cert, key
+    cert = XRAY_HOME / "certs" / "xray-selfsigned.crt"
+    key = XRAY_HOME / "certs" / "xray-selfsigned.key"
+    if not cert.exists() or not key.exists():
+        cn = re.sub(r"[^A-Za-z0-9_.-]", "", domain) or "xray.local"
+        run(f'openssl req -x509 -nodes -newkey rsa:2048 -days 3650 -subj "/CN={cn}" -addext "subjectAltName=DNS:{cn}" -keyout "{key}" -out "{cert}" >/dev/null 2>&1', check=True)
+        os.chmod(key, 0o600)
+    return str(cert), str(key)
+
+def ensure_reality(env):
+    if env.get("REALITY_PRIVATE_KEY") and env.get("REALITY_PUBLIC_KEY"):
+        return env
+    xray = shutil.which("xray") or "/usr/local/bin/xray"
+    if Path(xray).exists():
+        p = run(f'"{xray}" x25519', quiet=True)
+        out = p.stdout or ""
+        prv = re.search(r"Private key:\s*([A-Za-z0-9_-]+)", out)
+        pub = re.search(r"Public key:\s*([A-Za-z0-9_-]+)", out)
+        if prv and pub:
+            env["REALITY_PRIVATE_KEY"] = prv.group(1)
+            env["REALITY_PUBLIC_KEY"] = pub.group(1)
+    env.setdefault("REALITY_SNI", "www.cloudflare.com")
+    env.setdefault("REALITY_SHORT_ID", secrets.token_hex(8))
+    return env
+
+def setup_env(domain=None):
+    ensure_dirs()
+    env = load_env()
+    env["DOMAIN"] = domain or env.get("DOMAIN") or default_domain()
+    cert, key = find_tls(env["DOMAIN"])
+    env["TLS_CERT"] = cert
+    env["TLS_KEY"] = key
+    env = ensure_reality(env)
+    save_env(env)
+    if not ACCOUNTS.exists():
+        save_accounts([])
+    return env
+
+WEB_NETS = {"ws", "grpc", "xhttp", "httpupgrade"}
+PLAIN80_NETS = {"ws", "xhttp", "httpupgrade"}
+
+def stream(preset, env):
+    net = preset["net"]
+    public_sec = preset.get("sec", "none")
+    internal_sec = "none" if net in WEB_NETS else public_sec
+    out = {"network": net, "security": internal_sec}
+
+    if internal_sec == "tls":
+        out["tlsSettings"] = {
+            "serverName": env["DOMAIN"],
+            "alpn": ["h2", "http/1.1"],
+            "certificates": [{"certificateFile": env["TLS_CERT"], "keyFile": env["TLS_KEY"]}],
+        }
+    elif internal_sec == "reality":
+        out["realitySettings"] = {
+            "show": False,
+            "dest": f'{env.get("REALITY_SNI", "www.cloudflare.com")}:443',
+            "xver": 0,
+            "serverNames": [env.get("REALITY_SNI", "www.cloudflare.com")],
+            "privateKey": env.get("REALITY_PRIVATE_KEY", ""),
+            "shortIds": [env.get("REALITY_SHORT_ID", "")],
+        }
+
+    if net == "ws":
+        out["wsSettings"] = {"path": preset.get("path", "/"), "headers": {"Host": env["DOMAIN"]}}
+    elif net == "grpc":
+        out["grpcSettings"] = {"serviceName": preset.get("service", "xray-grpc")}
+    elif net == "xhttp":
+        out["xhttpSettings"] = {"path": preset.get("path", "/xhttp"), "host": env["DOMAIN"], "mode": "auto"}
+    elif net == "httpupgrade":
+        out["httpupgradeSettings"] = {"path": preset.get("path", "/hu"), "host": env["DOMAIN"]}
+    elif net == "kcp":
+        out["kcpSettings"] = {"mtu": 1350, "tti": 50, "uplinkCapacity": 20, "downlinkCapacity": 100, "congestion": False}
+        out["finalmask"] = {"udp": [{"type": "mkcp-original", "settings": {"header": "", "value": ""}}]}
+    return out
+
+
+def _xray_listen(preset):
+    if preset.get("listen"):
+        return preset["listen"]
+
+    proto = preset.get("proto", "")
+    net = preset.get("net", "")
+
+    if proto in {"socks", "http", "dokodemo-door"}:
+        return "127.0.0.1"
+
+    if net in WEB_NETS:
+        return "127.0.0.1"
+
+    return "0.0.0.0"
+
+def inbound(acc, env):
+    preset = PRESETS[acc["preset"]]
+    proto = preset["proto"]
+    tag = f'{acc["preset"]}-{acc["user"]}'
+    obj = {
+        "tag": tag,
+        "listen": _xray_listen(preset),
+        "port": int(acc.get("port", preset["base"])),
+        "protocol": proto,
+        "settings": {},
+        "streamSettings": stream(preset, env),
+        "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"]},
+    }
+    if proto == "vless":
+        c = {"id": acc["uuid"], "email": f'{acc["user"]}@hamada', "level": 0}
+        if preset.get("flow"):
+            c["flow"] = preset["flow"]
+        obj["settings"] = {"clients": [c], "decryption": "none"}
+    elif proto == "vmess":
+        obj["settings"] = {"clients": [{"id": acc["uuid"], "alterId": 0, "email": f'{acc["user"]}@hamada', "level": 0}]}
+    elif proto == "trojan":
+        obj["settings"] = {"clients": [{"password": acc["password"], "email": f'{acc["user"]}@hamada', "level": 0}]}
+    elif proto == "shadowsocks":
+        obj["settings"] = {"method": preset.get("method", "2022-blake3-aes-256-gcm"), "password": acc["password"], "network": "tcp,udp", "email": f'{acc["user"]}@hamada'}
+    elif proto == "socks":
+        obj["settings"] = {"auth": "password", "accounts": [{"user": acc["user"], "pass": acc["password"]}], "udp": True}
+    elif proto == "http":
+        obj["settings"] = {"accounts": [{"user": acc["user"], "pass": acc["password"]}]}
+    elif proto == "dokodemo-door":
+        target = acc.get("target", "127.0.0.1:80")
+        host, port = target.rsplit(":", 1)
+        obj["settings"] = {"address": host, "port": int(port), "network": "tcp,udp", "followRedirect": False}
+        obj["sniffing"] = {"enabled": False}
+        obj.pop("streamSettings", None)
+    return obj
+
+def inbound_group(preset_key, accounts, env):
+    preset = PRESETS[preset_key]
+    proto = preset["proto"]
+    listen = _xray_listen(preset)
+
+    obj = {
+        "tag": preset_key,
+        "listen": listen,
+        "port": int(preset["base"]),
+        "protocol": proto,
+        "settings": {},
+        "streamSettings": stream(preset, env),
+        "sniffing": {"enabled": True, "destOverride": ["http", "tls", "quic"]},
+    }
+
+    if proto == "vless":
+        clients = []
+        for acc in accounts:
+            c = {"id": acc["uuid"], "email": f'{acc["user"]}@hamada', "level": 0}
+            if preset.get("flow"):
+                c["flow"] = preset["flow"]
+            clients.append(c)
+        obj["settings"] = {"clients": clients, "decryption": "none"}
+
+    elif proto == "vmess":
+        obj["settings"] = {"clients": [{"id": acc["uuid"], "alterId": 0, "email": f'{acc["user"]}@hamada', "level": 0} for acc in accounts]}
+
+    elif proto == "trojan":
+        obj["settings"] = {"clients": [{"password": acc["password"], "email": f'{acc["user"]}@hamada', "level": 0} for acc in accounts]}
+
+    elif proto == "shadowsocks":
+        # Xray Shadowsocks 2022 is safest as one shared inbound.
+        # First active account owns the password for this preset.
+        acc = accounts[0]
+        obj["settings"] = {
+            "method": preset.get("method", "2022-blake3-aes-256-gcm"),
+            "password": acc["password"],
+            "network": "tcp,udp",
+        }
+    elif proto == "socks":
+        obj["settings"] = {"auth": "password", "accounts": [{"user": acc["user"], "pass": acc["password"]} for acc in accounts], "udp": True}
+
+    elif proto == "http":
+        obj["settings"] = {"accounts": [{"user": acc["user"], "pass": acc["password"]} for acc in accounts]}
+
+    elif proto == "dokodemo-door":
+        acc = accounts[0]
+        target = acc.get("target", "127.0.0.1:80")
+        host, port = target.rsplit(":", 1)
+        obj["settings"] = {"address": host, "port": int(port), "network": "tcp,udp", "followRedirect": False}
+        obj["sniffing"] = {"enabled": False}
+        obj.pop("streamSettings", None)
+
+    return obj
+
+
+def build(restart=False):
+    env = setup_env()
+    active_accounts = [a for a in load_accounts() if is_active(a)]
+
+    groups = {}
+    for acc in active_accounts:
+        groups.setdefault(acc["preset"], []).append(acc)
+
+    inbounds = []
+    for preset_key, items in groups.items():
+        if preset_key not in PRESETS:
+            continue
+        inbounds.append(inbound_group(preset_key, items, env))
+
+    outbounds = [
+        {"tag": "direct", "protocol": "freedom"},
+        {"tag": "block", "protocol": "blackhole"},
+    ]
+    routing_rules = []
+
+    for acc in active_accounts:
+        target = str(acc.get("forward_target", "")).strip()
+        if not target:
+            continue
+
+        preset = PRESETS.get(acc.get("preset", ""), {})
+        if preset.get("proto") not in {"vless", "vmess", "trojan"}:
+            continue
+
+        if not re.fullmatch(r"[^:\s]+:[0-9]{1,5}", target):
+            continue
+
+        host, port_text = target.rsplit(":", 1)
+        port = int(port_text)
+        if not 1 <= port <= 65535:
+            continue
+
+        safe_user = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(acc.get("user", "user")))
+        safe_preset = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(acc.get("preset", "preset")))
+        outbound_tag = f"forward-{safe_user}-{safe_preset}"
+
+        outbounds.append({
+            "tag": outbound_tag,
+            "protocol": "freedom",
+            "settings": {
+                "redirect": f"{host}:{port}",
+            },
+        })
+
+        routing_rules.append({
+            "type": "field",
+            "inboundTag": [str(acc.get("preset", ""))],
+            "user": [f'{acc.get("user")}@hamada'],
+            "network": "tcp",
+            "outboundTag": outbound_tag,
+        })
+
+    routing_rules.append({
+        "type": "field",
+        "ip": ["geoip:private"],
+        "outboundTag": "block",
+    })
+
+    config = {
+        "log": {"loglevel": "warning", "access": "/var/log/xray/access.log", "error": "/var/log/xray/error.log"},
+        "api": {"tag": "api", "listen": "127.0.0.1:10085", "services": ["StatsService"]},
+        "stats": {},
+        "policy": {
+            "levels": {
+                "0": {
+                    "statsUserOnline": True,
+                    "statsUserUplink": True,
+                    "statsUserDownlink": True,
+                }
+            }
+        },
+        "inbounds": inbounds,
+        "outbounds": outbounds,
+        "routing": {"domainStrategy": "AsIs", "rules": routing_rules},
+    }
+
+    XRAY_CONF.write_text(json.dumps(config, indent=2))
+
+    xray = shutil.which("xray") or "/usr/local/bin/xray"
+    if Path(xray).exists():
+        p = run(f'"{xray}" run -test -config "{XRAY_CONF}"', quiet=True)
+        if p.returncode != 0:
+            print(p.stdout or "")
+            die("xray config test failed")
+
+    _sync_shadowsocks_json_configs(
+        active_accounts,
+        env,
+    )
+
+    if restart:
+        run("systemctl restart xray >/dev/null 2>&1 || true")
+
+
+def validate_user(user):
+    return bool(re.fullmatch(r"[A-Za-z0-9_.-]{1,32}", user or ""))
+
+def used_ports(items):
+    return {int(a.get("port", 0)) for a in items if str(a.get("port", "")).isdigit()}
+
+def next_port(base, items):
+    used = used_ports(items)
+    port = int(base)
+    while port in used:
+        port += 100
+    return port
+
+def _color(code):
+    return f"\033[{code}m" if sys.stdout.isatty() else ""
+
+
+def _clear_page():
+    if not sys.stdout.isatty():
+        return
+
+    # Open alternate screen: no old session scrollback while copying account.
+    sys.stdout.write("\033[H\033[2J\033[3J")
+    sys.stdout.flush()
+
+def _clear_menu():
+    if sys.stdout.isatty():
+        sys.stdout.write("\033[H\033[2J\033[3J")
+        sys.stdout.flush()
+
+
+def _line():
+    dim = _color("2")
+    reset = _color("0")
+    print(f"{dim}{'=' * 58}{reset}")
+
+
+def _menu_item(num, title, desc="", value=""):
+    bold = _color("1")
+    cyan = _color("36")
+    reset = _color("0")
+    print(f"{bold}{cyan}[{num}]{reset} {title}")
+
+def _section(title):
+    bold = _color("1")
+    magenta = _color("35")
+    reset = _color("0")
+    print()
+    print(f"{bold}{magenta}{title}{reset}")
+
+
+def _preset_group(p):
+    net = p.get("net", "")
+    proto = p.get("proto", "")
+
+    if net == "ws":
+        return "WS"
+    if net == "grpc":
+        return "GRPC"
+    if net == "xhttp":
+        return "XHTTP"
+    if net == "httpupgrade":
+        return "HTTPUP"
+    if net == "tcp":
+        return "TCP"
+    if net in ("kcp", "udp") or p.get("udp") :
+        return "UDP"
+    if proto in ("socks", "http", "dokodemo"):
+        return "LOCAL"
+    return "OTHER"
+
+
+PRESET_GROUPS = [
+    ("WS", "WebSocket WS", ""),
+    ("GRPC", "gRPC", ""),
+    ("XHTTP", "XHTTP", ""),
+    ("HTTPUP", "HTTPUpgrade", ""),
+    ("TCP", "TCP / TLS / Reality", ""),
+    ("UDP", "UDP / KCP", ""),
+    ("LOCAL", "Local / Redirect", ""),
+]
+
+def _preset_scope(p):
+    proto = p.get("proto", "")
+    net = p.get("net", "")
+
+    if net == "grpc":
+        return "public:443-only"
+    if net in PLAIN80_NETS:
+        return "public:80/443"
+    if net in WEB_NETS:
+        return "public:443-only"
+    if proto in {"socks", "http", "dokodemo-door"}:
+        return "local-only"
+    return "direct-public"
+
+
+def _preset_client_ports(p):
+    proto = p.get("proto", "")
+    net = p.get("net", "")
+    base = p.get("base", "")
+
+    if net == "grpc":
+        return "client:443"
+    if net in PLAIN80_NETS:
+        return "client:80/443"
+    if net in WEB_NETS:
+        return "client:443"
+
+    if proto in {"socks", "http", "dokodemo-door"} or p.get("listen") == "127.0.0.1":
+        return f"local:{base}"
+
+    if net in {"kcp", "udp", "udp"} or p.get("udp"):
+        return f"client UDP:{base}"
+
+    if net == "tcp":
+        return f"client TCP:{base}"
+
+    return f"client:{base}"
+
+
+def _preset_rows(group_key=None):
+    rows = []
+    for i, (key, preset) in enumerate(PRESETS.items(), 1):
+        if group_key and _preset_group(preset) != group_key:
+            continue
+        rows.append((i, key, preset))
+    return rows
+
+
+def _print_preset_rows(group_key=None, clear_page=False):
+    if clear_page:
+        _clear_menu()
+
+    bold = _color("1")
+    cyan = _color("36")
+    green = _color("32")
+    yellow = _color("33")
+    reset = _color("0")
+
+    rows = []
+    for g, _title, _desc in PRESET_GROUPS:
+        if group_key and g != group_key:
+            continue
+        rows.extend(_preset_rows(g))
+
+    _line()
+    print(f"{bold}{cyan}{'XRAY PRESETS':^58}{reset}")
+    _line()
+
+    n = 1
+    for g, title, _desc in PRESET_GROUPS:
+        if group_key and g != group_key:
+            continue
+
+        group_rows = _preset_rows(g)
+        if not group_rows:
+            continue
+
+        _section(title)
+        for _old_i, key, preset in group_rows:
+            scope = _preset_scope(preset)
+            color = green if scope.startswith("public") or scope.startswith("direct") else yellow
+            print(f"{bold}{cyan}[{n:02d}]{reset} {key:<28} {color}{scope}{reset}")
+            n += 1
+
+    _line()
+    return rows
+
+
+def presets(_args):
+    _print_preset_rows()
+
+
+def choose_preset_interactive():
+    _clear_menu()
+
+    bold = _color("1")
+    cyan = _color("36")
+    reset = _color("0")
+
+    available = []
+    for group_key, title, _desc in PRESET_GROUPS:
+        count = len(_preset_rows(group_key))
+        if count:
+            available.append((group_key, title, count))
+
+    _line()
+    print(f"{bold}{cyan}{'CHOOSE XRAY PROTOCOL':^58}{reset}")
+    _line()
+
+    _section("PROTOCOL TYPES")
+    for idx, (_group_key, title, count) in enumerate(available, 1):
+        _menu_item(str(idx), f"{title} ({count} presets)")
+
+    show_all = str(len(available) + 1)
+    print()
+    _menu_item(show_all, "Show all presets")
+    _menu_item("0", "Cancel")
+
+    _line()
+    choice = input("Choose: ").strip()
+
+    if choice == "0":
+        die("cancelled")
+
+    if choice.isdigit() and 1 <= int(choice) <= len(available):
+        group_key, _title, _count = available[int(choice) - 1]
+        rows = _print_preset_rows(group_key, clear_page=True)
+        pick = input("\nPreset number/name: ").strip()
+        if pick.isdigit() and 1 <= int(pick) <= len(rows):
+            return rows[int(pick) - 1][1]
+        return pick_preset(pick)
+
+    if choice == show_all:
+        rows = _print_preset_rows(clear_page=True)
+        pick = input("\nPreset number/name: ").strip()
+        if pick.isdigit() and 1 <= int(pick) <= len(rows):
+            return rows[int(pick) - 1][1]
+        return pick_preset(pick)
+
+    return pick_preset(choice)
+
+def pick_preset(value=None):
+    keys = list(PRESETS)
+    if value:
+        if value in PRESETS:
+            return value
+        if value.isdigit() and 1 <= int(value) <= len(keys):
+            return keys[int(value) - 1]
+        die(f"unknown preset: {value}")
+
+    return choose_preset_interactive()
+
+
+def init(args):
+    env = setup_env(args.domain)
+    build(False)
+    print(f"[OK] Xray initialized for {env['DOMAIN']}")
+    print(f"[OK] Config: {XRAY_CONF}")
+
+
+def make_password(preset):
+    # Shadowsocks 2022 AES-256-GCM requires a standard base64 32-byte PSK.
+    if preset.get("proto") == "shadowsocks" and str(preset.get("method", "")).startswith("2022-blake3-aes-256-gcm"):
+        return base64.b64encode(secrets.token_bytes(32)).decode()
+    return secrets.token_urlsafe(24)
+
+def add(args):
+    items = load_accounts()
+    user = args.user or input("Username: ").strip()
+    if not validate_user(user):
+        die("bad username; use A-Z a-z 0-9 _ . - max 32 chars")
+    days = int(args.days or input("Days: ").strip() or "30")
+    preset_key = pick_preset(args.preset)
+    preset = PRESETS[preset_key]
+    if any(a["user"] == user and a["preset"] == preset_key for a in items):
+        die("same user already exists for this preset")
+    acc = {
+        "user": user,
+        "preset": preset_key,
+        "uuid": str(uuid.uuid4()),
+        "password": make_password(preset),
+        "port": int(args.listen_port or preset["base"]),
+        "created": now_date().isoformat(),
+        "expires": expiry(days),
+    }
+    if preset_key == "dokodemo-door":
+        target = args.target or input("Target host:port: ").strip()
+        if not re.fullmatch(r"[^:]+:[0-9]{1,5}", target):
+            die("target must be host:port")
+        acc["target"] = target
+    items.append(acc)
+    save_accounts(items)
+    build(True)
+    show_account(
+        acc,
+        clear_page=True,
+        copy_to_clipboard=False,
+    )
+
+def trial(args):
+    add(argparse.Namespace(user=args.user, days=1, preset=args.preset, target=args.target, listen_port=args.listen_port))
+
+def renew(args):
+    hit = False
+    preset_filter = getattr(args, "preset", None)
+    items = load_accounts()
+
+    for acc in items:
+        if acc.get("user") != args.user:
+            continue
+        if preset_filter and acc.get("preset") != preset_filter:
+            continue
+
+        acc["expires"] = expiry(args.days)
+        hit = True
+
+    if not hit:
+        die("user/preset not found")
+
+    save_accounts(items)
+    build(True)
+
+    scope = f" ({preset_filter})" if preset_filter else ""
+    print(f"[OK] renewed {args.user}{scope} for {args.days} days")
+
+
+def set_forward(args):
+    target = str(args.target or "").strip()
+
+    if not re.fullmatch(r"[^:\s]+:[0-9]{1,5}", target):
+        die("target must be host:port")
+
+    host, port_text = target.rsplit(":", 1)
+    port = int(port_text)
+    if not 1 <= port <= 65535:
+        die("target port must be 1-65535")
+
+    items = load_accounts()
+    changed = False
+
+    for acc in items:
+        if acc.get("user") != args.user or acc.get("preset") != args.preset:
+            continue
+
+        preset = PRESETS.get(acc.get("preset", ""), {})
+        if preset.get("proto") not in {"vless", "vmess", "trojan"}:
+            die("forward target is supported only for VLESS/VMess/Trojan accounts")
+
+        acc["forward_target"] = f"{host}:{port}"
+        changed = True
+        break
+
+    if not changed:
+        die("user/preset not found")
+
+    save_accounts(items)
+    build(True)
+    print(f"[OK] forwarding enabled: {args.user}/{args.preset} -> {host}:{port}")
+
+
+def clear_forward(args):
+    items = load_accounts()
+    changed = False
+
+    for acc in items:
+        if acc.get("user") == args.user and acc.get("preset") == args.preset:
+            acc.pop("forward_target", None)
+            changed = True
+            break
+
+    if not changed:
+        die("user/preset not found")
+
+    save_accounts(items)
+    build(True)
+    print(f"[OK] forwarding removed: {args.user}/{args.preset}")
+
+
+
+def delete(args):
+    accounts = load_accounts()
+    if not accounts:
+        die("No Xray accounts found.")
+
+    user = getattr(args, "user", None)
+    preset = getattr(args, "preset", None)
+    port = getattr(args, "port", None)
+
+    if user:
+        matches = [
+            acc for acc in accounts
+            if acc.get("user") == user
+            and (not preset or acc.get("preset") == preset)
+            and (port is None or str(acc.get("port", "")) == str(port))
+        ]
+
+        if not matches:
+            die("Account not found.")
+
+        selected = (
+            matches[0]
+            if len(matches) == 1
+            else choose_account_interactive(
+                "DELETE XRAY ACCOUNT",
+                matches,
+            )
+        )
+    else:
+        selected = choose_account_interactive(
+            "DELETE XRAY ACCOUNT",
+            accounts,
+        )
+
+    keep = [
+        acc for acc in accounts
+        if not _same_account(acc, selected)
+    ]
+
+    if len(keep) == len(accounts):
+        die("Selected account was not found while deleting.")
+
+    backup_deleted_account(selected)
+    save_accounts(keep)
+    build(False)
+    run("systemctl restart xray >/dev/null 2>&1 || true")
+
+    print(
+        "[OK] Deleted and backed up: "
+        f"{selected.get('user')} / "
+        f"{selected.get('preset')} / "
+        f"port {selected.get('port')}"
+    )
+
+
+def b64(data):
+    return base64.b64encode(data.encode()).decode().replace("\n", "")
+
+def link(acc, env, public_port=None, public_security=None):
+    p = PRESETS[acc["preset"]]
+    host = env["DOMAIN"]
+    net = p["net"]
+
+    if public_port is None:
+        public_port = 443 if net in WEB_NETS and p.get("sec") == "tls" else int(acc.get("port", p["base"]))
+
+    sec = public_security if public_security is not None else p["sec"]
+    tag = quote(f'{acc["user"]}-{acc["preset"]}')
+
+    qs = f"type={quote(net)}&security={quote(sec)}"
+
+    if net == "kcp":
+        qs += "&headerType=none"
+
+    if sec == "tls":
+        qs += f"&sni={quote(host)}"
+    elif sec == "reality":
+        qs += f"&sni={quote(env.get('REALITY_SNI', 'www.cloudflare.com'))}&fp=chrome&pbk={quote(env.get('REALITY_PUBLIC_KEY', ''))}&sid={quote(env.get('REALITY_SHORT_ID', ''))}&spx=%2F"
+
+    if net == "ws":
+        qs += f"&path={quote(p.get('path', '/'))}&host={quote(host)}"
+    elif net == "grpc":
+        qs += f"&serviceName={quote(p.get('service', 'xray-grpc'))}"
+    elif net == "xhttp":
+        qs += f"&path={quote(p.get('path', '/xhttp'))}&host={quote(host)}&mode=auto"
+    elif net == "httpupgrade":
+        qs += f"&path={quote(p.get('path', '/hu'))}&host={quote(host)}"
+
+    if p.get("flow"):
+        qs += f"&flow={quote(p['flow'])}"
+
+    if p["proto"] == "vless":
+        return f"vless://{acc['uuid']}@{host}:{public_port}?encryption=none&{qs}#{tag}"
+
+    if p["proto"] == "vmess":
+        data = {
+            "v": "2",
+            "ps": f"{acc['user']}-{acc['preset']}",
+            "add": host,
+            "port": str(public_port),
+            "id": acc["uuid"],
+            "aid": "0",
+            "scy": "auto",
+            "net": net,
+            "type": "none",
+            "host": host if net in {"ws", "xhttp", "httpupgrade"} else "",
+            "path": p.get("path", p.get("service", "")) if net != "tcp" else "",
+            "tls": "tls" if sec == "tls" else "",
+            "sni": host if sec == "tls" else "",
+        }
+        return "vmess://" + b64(json.dumps(data, separators=(",", ":")))
+
+    if p["proto"] == "trojan":
+        if p.get("net") == "grpc":
+            service = p.get("service", "trojangrpc").replace("-", "")
+            return f"trojan://{quote(acc['password'])}@{host}:{public_port}?mode=gun&security=tls&type=grpc&serviceName={service}&sni={host}#{quote(acc['user'])}"
+        return f"trojan://{quote(acc['password'])}@{host}:{public_port}?{qs}#{tag}"
+
+    if p["proto"] == "shadowsocks":
+        return f"ss://{b64(p.get('method', '2022-blake3-aes-256-gcm') + ':' + acc['password'])}@{host}:{public_port}#{tag}"
+
+    if p["proto"] in {"socks", "http"}:
+        return f"{p['proto']}://{quote(acc['user'])}:{quote(acc['password'])}@127.0.0.1:{acc['port']}#{tag}"
+
+    if p["proto"] == "dokodemo-door":
+        return f"dokodemo-door://{host}:{acc['port']} -> {acc.get('target', '')}"
+
+    return ""
+
+
+
+def _shadowsocks_json_token(acc):
+    material = "\0".join([
+        str(acc.get("user", "")),
+        str(acc.get("preset", "")),
+        str(acc.get("uuid", "")),
+        str(acc.get("password", "")),
+    ]).encode("utf-8")
+
+    return hashlib.sha256(material).hexdigest()[:32]
+
+
+def _shadowsocks_json_url(acc, env):
+    token = _shadowsocks_json_token(acc)
+    return (
+        f"https://{env['DOMAIN']}"
+        f"/payloads/xray-configs/ss-{token}.json"
+    )
+
+
+def _shadowsocks_client_stream(preset, env):
+    network = str(preset.get("net", "tcp"))
+    security = str(preset.get("sec", "none"))
+
+    stream_settings = {
+        "network": network,
+        "security": security,
+    }
+
+    if security == "tls":
+        tls_settings = {
+            "serverName": env["DOMAIN"],
+            "allowInsecure": False,
+        }
+
+        if network == "grpc":
+            tls_settings["alpn"] = ["h2"]
+        elif network == "ws":
+            tls_settings["alpn"] = ["http/1.1"]
+
+        stream_settings["tlsSettings"] = tls_settings
+
+    if network == "ws":
+        stream_settings["wsSettings"] = {
+            "path": preset.get("path", "/"),
+            "headers": {
+                "Host": env["DOMAIN"],
+            },
+        }
+
+    elif network == "grpc":
+        stream_settings["grpcSettings"] = {
+            "serviceName": preset.get(
+                "service",
+                "xray-grpc",
+            ),
+        }
+
+    return stream_settings
+
+
+def _shadowsocks_client_config(acc, env):
+    preset = PRESETS[acc["preset"]]
+    network = preset.get("net", "tcp")
+
+    public_port = (
+        443
+        if network in WEB_NETS
+        and preset.get("sec") == "tls"
+        else int(acc.get("port", preset["base"]))
+    )
+
+    return {
+        "remarks": (
+            f"{acc.get('user', 'user')}-"
+            f"{acc.get('preset', 'shadowsocks')}"
+        ),
+        "log": {
+            "loglevel": "warning",
+        },
+        "inbounds": [
+            {
+                "tag": "socks-in",
+                "listen": "127.0.0.1",
+                "port": 10808,
+                "protocol": "socks",
+                "settings": {
+                    "auth": "noauth",
+                    "udp": True,
+                },
+            },
+            {
+                "tag": "http-in",
+                "listen": "127.0.0.1",
+                "port": 10809,
+                "protocol": "http",
+                "settings": {},
+            },
+        ],
+        "outbounds": [
+            {
+                "tag": "proxy",
+                "protocol": "shadowsocks",
+                "settings": {
+                    "servers": [
+                        {
+                            "address": env["DOMAIN"],
+                            "port": public_port,
+                            "method": preset.get(
+                                "method",
+                                "2022-blake3-aes-256-gcm",
+                            ),
+                            "password": acc["password"],
+                        }
+                    ],
+                },
+                "streamSettings": _shadowsocks_client_stream(
+                    preset,
+                    env,
+                ),
+                "mux": {
+                    "enabled": False,
+                },
+            },
+            {
+                "tag": "direct",
+                "protocol": "freedom",
+                "settings": {},
+            },
+            {
+                "tag": "block",
+                "protocol": "blackhole",
+                "settings": {},
+            },
+        ],
+        "routing": {
+            "domainStrategy": "AsIs",
+            "rules": [],
+        },
+    }
+
+
+def _sync_shadowsocks_json_configs(accounts, env):
+    try:
+        SHADOWSOCKS_JSON_DIR.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+        SHADOWSOCKS_JSON_DIR.chmod(0o755)
+
+        desired_files = set()
+
+        for acc in accounts:
+            preset = PRESETS.get(
+                acc.get("preset", ""),
+                {},
+            )
+
+            if preset.get("proto") != "shadowsocks":
+                continue
+
+            token = _shadowsocks_json_token(acc)
+            filename = f"ss-{token}.json"
+            destination = SHADOWSOCKS_JSON_DIR / filename
+            temporary = destination.with_suffix(".tmp")
+
+            payload = _shadowsocks_client_config(
+                acc,
+                env,
+            )
+
+            temporary.write_text(
+                json.dumps(
+                    payload,
+                    indent=2,
+                    ensure_ascii=False,
+                ) + "\n"
+            )
+            temporary.chmod(0o644)
+            temporary.replace(destination)
+            destination.chmod(0o644)
+
+            desired_files.add(filename)
+
+        for old_file in SHADOWSOCKS_JSON_DIR.glob(
+            "ss-*.json"
+        ):
+            if old_file.name not in desired_files:
+                old_file.unlink()
+
+        return True
+
+    except OSError as exc:
+        print(
+            f"[WARN] Shadowsocks JSON sync failed: {exc}",
+            file=sys.stderr,
+        )
+        return False
+
+
+def _safe_copy_name(user):
+    return "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in user)
+
+
+def _osc52_copy(text):
+    if not sys.stdout.isatty():
+        return False
+
+    try:
+        data = base64.b64encode(text.encode()).decode()
+        sys.stdout.write(f"\033]52;c;{data}\a")
+        sys.stdout.flush()
+        return True
+    except Exception:
+        return False
+
+
+def _save_xray_copy_file(user, text):
+    try:
+        copy_dir = Path("/root/xray-copy")
+        copy_dir.mkdir(parents=True, exist_ok=True)
+        out = copy_dir / f"{_safe_copy_name(user)}.txt"
+        out.write_text(text)
+        out.chmod(0o600)
+        return out
+    except Exception:
+        return None
+
+
+def _account_client_ports(preset, acc):
+    proto = preset.get("proto", "")
+    net = preset.get("net", "")
+
+    if net == "grpc":
+        return "443"
+    if net in PLAIN80_NETS:
+        return "80 / 443"
+    if net in WEB_NETS:
+        return "443"
+
+    if proto in {"socks", "http", "dokodemo-door"} or preset.get("listen") == "127.0.0.1":
+        return str(acc["port"])
+
+    return str(acc["port"])
+
+
+
+def _slowdns_read(path, default=""):
+    try:
+        value = Path(path).read_text().strip()
+        return value or default
+    except OSError:
+        return default
+
+
+def _slowdns_xray_lines(preset, domain):
+    public_key_path = Path(
+        "/etc/hamada/slowdns/server.pub"
+    )
+
+    if not public_key_path.is_file():
+        return [
+            "Status         : Not configured",
+        ]
+
+    tunnel_domain = _slowdns_read(
+        "/etc/hamada/slowdns-domain",
+        f"ns-{domain}",
+    )
+    ns_host = _slowdns_read(
+        "/etc/hamada/slowdns-ns-host",
+        domain,
+    )
+    public_key = "".join(
+        _slowdns_read(
+            "/etc/hamada/slowdns/server.pub",
+            "",
+        ).split()
+    )
+
+    compatible = (
+        preset.get("net") in WEB_NETS
+        and preset.get("sec") == "tls"
+    )
+
+    mode = (
+        "V2Ray ON / SSH OFF"
+        if compatible
+        else "Use TLS web preset on 443"
+    )
+
+    return [
+        "Status         : Enabled",
+        f"Tunnel Domain  : {tunnel_domain}",
+        f"NS Host        : {ns_host}",
+        f"Public Key     : {public_key}",
+        "DNS            : 8.8.8.8 / 1.1.1.1",
+        "Public Ports   : 53, 80, 443",
+        f"Mode           : {mode}",
+    ]
+
+
+def _format_xray_account_text(acc, env):
+    preset = PRESETS[acc["preset"]]
+    lines = []
+
+    lines.append("=" * 58)
+    lines.append("XRAY ACCOUNT".center(58))
+    lines.append("=" * 58)
+    lines.append(f"User     : {acc['user']}")
+    lines.append(f"Protocol : {preset['title']}")
+    lines.append(f"Server   : {env['DOMAIN']}")
+    lines.append(f"Port     : {_account_client_ports(preset, acc)}")
+    preset_obj = PRESETS.get(acc.get("preset", ""), {})
+    proto = preset_obj.get("proto", "")
+    if proto in ("vless", "vmess"):
+        lines.append(f"UUID     : {acc['uuid']}")
+    if "password" in acc and proto in ("trojan", "shadowsocks", "socks", "http"):
+        lines.append(f"Password : {acc['password']}")
+    lines.append(f"Expires  : {acc['expires']}")
+
+    if acc.get("target"):
+        lines.append(f"Target   : {acc['target']}")
+
+    lines.append("")
+    lines.append("LINKS")
+    lines.append("-" * 58)
+
+    if preset["net"] in WEB_NETS:
+        lines.append("443 TLS")
+        lines.append(link(acc, env, 443, "tls"))
+
+        if preset["net"] in PLAIN80_NETS:
+            lines.append("")
+            lines.append("80 NON-TLS")
+            lines.append(link(acc, env, 80, "none"))
+
+    else:
+        lines.append(link(acc, env))
+
+    if proto == "shadowsocks" and is_active(acc):
+        lines.append("")
+        lines.append("JSON CONFIG")
+        lines.append("-" * 58)
+        lines.append(_shadowsocks_json_url(acc, env))
+
+    lines.append("")
+    lines.append("SLOWDNS / XRAY")
+    lines.append("-" * 58)
+    lines.extend(
+        _slowdns_xray_lines(
+            preset,
+            env["DOMAIN"],
+        )
+    )
+
+    lines.append("=" * 58)
+    return "\n".join(lines) + "\n"
+
+
+def show_account(
+    acc,
+    clear_page=True,
+    copy_to_clipboard=True,
+):
+    env = setup_env()
+
+    preset = PRESETS.get(acc.get("preset", ""), {})
+    if preset.get("proto") == "shadowsocks":
+        active_accounts = [
+            item
+            for item in load_accounts()
+            if is_active(item)
+        ]
+        _sync_shadowsocks_json_configs(
+            active_accounts,
+            env,
+        )
+
+    text = _format_xray_account_text(acc, env)
+
+    copy_name = f"{acc.get('user', 'account')}-{acc.get('preset', 'xray')}"
+    _save_xray_copy_file(copy_name, text)
+
+    if clear_page:
+        _clear_page()
+
+    if copy_to_clipboard:
+        _osc52_copy(text)
+
+    print(text, end="")
+
+
+def show_user(user, clear_page=True):
+    items = [
+        acc for acc in load_accounts()
+        if acc.get("user") == user
+    ]
+
+    if not items:
+        die("user not found")
+
+    if len(items) == 1:
+        show_account(items[0], clear_page=clear_page)
+        return
+
+    selected = choose_account_interactive(
+        "SHOW XRAY ACCOUNT",
+        items,
+    )
+    show_account(selected, clear_page=clear_page)
+
+
+def show(args):
+    accounts = load_accounts()
+    if not accounts:
+        die("No Xray accounts found.")
+
+    user = getattr(args, "user", None)
+    preset = getattr(args, "preset", None)
+    port = getattr(args, "port", None)
+
+    if user:
+        matches = [
+            acc for acc in accounts
+            if acc.get("user") == user
+            and (not preset or acc.get("preset") == preset)
+            and (port is None or str(acc.get("port", "")) == str(port))
+        ]
+
+        if not matches:
+            die("Account not found.")
+
+        selected = (
+            matches[0]
+            if len(matches) == 1
+            else choose_account_interactive(
+                "SHOW XRAY ACCOUNT",
+                matches,
+            )
+        )
+    else:
+        selected = choose_account_interactive(
+            "SHOW XRAY ACCOUNT",
+            accounts,
+        )
+
+    show_account(selected)
+    _copy_wait()
+
+
+
+def list_users(_args=None):
+    items = load_accounts()
+    if not items:
+        print("No Xray accounts.")
+        return
+    print(f"{'USER':<18} {'PRESET':<25} {'PORT':<6} {'EXPIRES':<12} {'ACTIVE':<6}")
+    for a in items:
+        print(f"{a['user']:<18} {a['preset']:<25} {a.get('port',''):<6} {a['expires']:<12} {'yes' if is_active(a) else 'no':<6}")
+
+def restart(_args):
+    build(False)
+    run("systemctl restart xray", check=False)
+    run("systemctl restart hamada-xray-firewall >/dev/null 2>&1 || true")
+    print("[OK] xray restarted")
+
+def status(_args):
+    run("systemctl status xray --no-pager -l | sed -n '1,80p'")
+
+def doctor(_args):
+    print("== VERSION ==")
+    run("(xray version || /usr/local/bin/xray version) 2>&1 | head -n 5")
+    print("\n== CONFIG TEST ==")
+    xray = shutil.which("xray") or "/usr/local/bin/xray"
+    run(f'"{xray}" run -test -config "{XRAY_CONF}" 2>&1 || true')
+    print("\n== SERVICE ==")
+    run("systemctl is-active xray || true")
+    print("\n== PORTS ==")
+    run("ss -lntup | grep -E ':(844[3-9]|845[0-9]|846[0-9]|849[0-9]|85[0-9][0-9]|10808|10809)\\b' || true")
+    print("\n== ACCOUNTS ==")
+    list_users()
+
+def _copy_wait():
+    if not sys.stdout.isatty():
+        return
+
+    try:
+        input()
+    except (EOFError, KeyboardInterrupt):
+        pass
+    finally:
+        sys.stdout.write("")
+        sys.stdout.flush()
+
+
+def _pause():
+    print()
+    input("Press Enter to continue...")
+
+
+def _xray_header(title="XRAY MANAGER"):
+    _clear_menu()
+
+    bold = _color("1")
+    cyan = _color("36")
+    reset = _color("0")
+
+    _line()
+    print(f"{bold}{cyan}{title:^58}{reset}")
+    _line()
+
+DELETED_ACCOUNTS = XRAY_HOME / "deleted-accounts.json"
+
+def load_deleted_accounts():
+    if not DELETED_ACCOUNTS.exists():
+        return []
+    try:
+        data = json.loads(DELETED_ACCOUNTS.read_text())
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+def save_deleted_accounts(items):
+    ensure_dirs()
+    DELETED_ACCOUNTS.write_text(json.dumps(items, indent=2, sort_keys=True))
+    os.chmod(DELETED_ACCOUNTS, 0o600)
+
+def backup_deleted_account(acc):
+    items = load_deleted_accounts()
+    acc = dict(acc)
+    acc["deleted_at"] = dt.datetime.utcnow().isoformat() + "Z"
+    items.insert(0, acc)
+    save_deleted_accounts(items[:200])
+
+def choose_account_interactive(
+    title="Select Xray account",
+    accounts=None,
+):
+    accounts = (
+        list(accounts)
+        if accounts is not None
+        else load_accounts()
+    )
+
+    if not accounts:
+        die("No Xray accounts found.")
+
+    _xray_header(title)
+
+    for i, acc in enumerate(accounts, 1):
+        print(
+            f"[{i:02d}] "
+            f"{acc.get('user', 'unknown'):<18} | "
+            f"{acc.get('preset', 'unknown')}"
+        )
+
+    print("[00] Cancel")
+    _line()
+
+    choice = input("Select account number: ").strip()
+
+    if choice in {"0", "00"}:
+        die("cancelled")
+
+    if not choice.isdigit():
+        die("Invalid account selection.")
+
+    index = int(choice) - 1
+    if not 0 <= index < len(accounts):
+        die("Invalid account selection.")
+
+    return accounts[index]
+
+
+
+def change_uuid_menu(_args=None):
+    acc = choose_account_interactive("CHANGE XRAY UUID")
+    if "uuid" not in acc:
+        die("This account does not support UUID.")
+    old = acc.get("uuid", "")
+    new = input(f"New UUID [auto]: ").strip() or str(uuid.uuid4())
+    try:
+        uuid.UUID(new)
+    except Exception:
+        die("Invalid UUID.")
+    accounts = load_accounts()
+    for item in accounts:
+        if item.get("user") == acc.get("user"):
+            item["uuid"] = new
+            break
+    save_accounts(accounts)
+    build(False)
+    run("systemctl restart xray >/dev/null 2>&1 || true")
+    print(f"[OK] UUID changed for {acc.get('user')}")
+    print(f"Old UUID: {old}")
+    print(f"New UUID: {new}")
+
+
+def _same_account(a, b):
+    return (
+        a.get("user") == b.get("user")
+        and a.get("preset") == b.get("preset")
+        and str(a.get("port", "")) == str(b.get("port", ""))
+    )
+
+
+def change_password_menu(_args=None):
+    acc = choose_account_interactive("CHANGE XRAY PASSWORD")
+    preset = PRESETS.get(acc.get("preset", ""), {})
+    proto = preset.get("proto", "")
+
+    if proto not in ("trojan", "shadowsocks", "socks", "http"):
+        die("This account uses UUID, not password. Use Change UUID.")
+
+    old = acc.get("password", "")
+    new = input("New password [auto]: ").strip() or secrets.token_urlsafe(18)
+
+    accounts = load_accounts()
+    changed = False
+
+    for item in accounts:
+        if (
+            item.get("user") == acc.get("user")
+            and item.get("preset") == acc.get("preset")
+            and str(item.get("port", "")) == str(acc.get("port", ""))
+        ):
+            item["password"] = new
+            changed = True
+            break
+
+    if not changed:
+        die("Account not found while saving password.")
+
+    save_accounts(accounts)
+    build(False)
+    run("systemctl restart xray >/dev/null 2>&1 || true")
+
+    print(f"[OK] Password changed for {acc.get('user')}")
+    print(f"Protocol : {preset.get('title', acc.get('preset'))}")
+    print(f"Old Pass : {old}")
+    print(f"New Pass : {new}")
+    print("")
+    print("Run: xrayctl show " + acc.get("user", ""))
+
+
+def restore_deleted_xray_menu(_args=None):
+    deleted = load_deleted_accounts()
+    if not deleted:
+        die("No deleted Xray accounts backup found.")
+    _xray_header("RESTORE DELETED XRAY ACCOUNT")
+    for i, acc in enumerate(deleted, 1):
+        print(f"[{i:02d}] {acc.get('user','unknown'):<20} | {acc.get('preset','unknown'):<24} | deleted: {acc.get('deleted_at','')}")
+    print("[0] Cancel")
+    _line()
+    c = input("Select account to restore: ").strip()
+    if c == "0":
+        die("cancelled")
+    if not c.isdigit() or not (1 <= int(c) <= len(deleted)):
+        die("Invalid selection.")
+    acc = dict(deleted[int(c)-1])
+    acc.pop("deleted_at", None)
+
+    accounts = load_accounts()
+    if any(a.get("user") == acc.get("user") for a in accounts):
+        die("Account already exists with same username.")
+
+    accounts.append(acc)
+    save_accounts(accounts)
+
+    deleted.pop(int(c)-1)
+    save_deleted_accounts(deleted)
+
+    build(False)
+    run("systemctl restart xray >/dev/null 2>&1 || true")
+    print(f"[OK] Restored Xray account: {acc.get('user')}")
+
+def connected_clients_menu(_args=None):
+    accounts = load_accounts()
+    log_file = Path("/var/log/xray/access.log")
+    active_window = 180
+    api_server = "127.0.0.1:10085"
+    xray = shutil.which("xray") or "/usr/local/bin/xray"
+
+    _xray_header("XRAY CONNECTED CLIENTS")
+
+    if not accounts:
+        print("No Xray accounts found.")
+        return
+
+    known_emails = {
+        f"{acc.get('user')}@hamada"
+        for acc in accounts
+        if acc.get("user")
+    }
+
+    activity = {
+        email: {"last": None, "active_ips": set()}
+        for email in known_emails
+    }
+
+    def read_log_tail(max_bytes=4 * 1024 * 1024):
+        if not log_file.exists():
+            return ""
+
+        try:
+            with log_file.open("rb") as handle:
+                handle.seek(0, 2)
+                size = handle.tell()
+                handle.seek(max(0, size - max_bytes))
+                data = handle.read()
+            return data.decode(errors="ignore")
+        except OSError:
+            return ""
+
+    def valid_source_ip(value):
+        value = str(value or "").strip().strip("[]")
+
+        try:
+            address = ipaddress.ip_address(value)
+        except ValueError:
+            return None
+
+        if address.is_loopback or address.is_unspecified:
+            return None
+
+        return str(address)
+
+    now = dt.datetime.now()
+    cutoff = now - dt.timedelta(seconds=active_window)
+
+    timestamp_pattern = re.compile(
+        r"^(?P<stamp>\d{4}/\d{2}/\d{2} "
+        r"\d{2}:\d{2}:\d{2}(?:\.\d+)?)"
+    )
+    email_pattern = re.compile(r"\bemail:\s*(?P<email>[^\s,]+)")
+    source_pattern = re.compile(
+        r"\bfrom\s+(?:tcp:|udp:)?"
+        r"(?P<source>\[[0-9A-Fa-f:]+\]|"
+        r"(?:\d{1,3}\.){3}\d{1,3})(?::\d+)?"
+    )
+
+    for line in read_log_tail().splitlines():
+        email_match = email_pattern.search(line)
+        stamp_match = timestamp_pattern.search(line)
+
+        if not email_match or not stamp_match:
+            continue
+
+        email = email_match.group("email")
+        if email not in activity:
+            continue
+
+        try:
+            stamp = dt.datetime.strptime(
+                stamp_match.group("stamp"),
+                "%Y/%m/%d %H:%M:%S.%f",
+            )
+        except ValueError:
+            try:
+                stamp = dt.datetime.strptime(
+                    stamp_match.group("stamp"),
+                    "%Y/%m/%d %H:%M:%S",
+                )
+            except ValueError:
+                continue
+
+        previous = activity[email]["last"]
+        if previous is None or stamp > previous:
+            activity[email]["last"] = stamp
+
+        if stamp < cutoff:
+            continue
+
+        source_match = source_pattern.search(line)
+        if source_match:
+            source = valid_source_ip(source_match.group("source"))
+            if source:
+                activity[email]["active_ips"].add(source)
+
+    def api_call(command, email=None):
+        if not Path(xray).exists():
+            return None
+
+        args = [
+            xray,
+            "api",
+            command,
+            f"--server={api_server}",
+            "--timeout=2",
+        ]
+
+        if email:
+            args.extend(["-email", email])
+
+        try:
+            result = subprocess.run(
+                args,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=4,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+
+        if result.returncode != 0:
+            return None
+
+        return (result.stdout or "").strip()
+
+    def extract_emails(raw):
+        if not raw:
+            return set()
+
+        return set(
+            re.findall(
+                r"[A-Za-z0-9_.-]+@hamada\b",
+                raw,
+            )
+        )
+
+    def extract_session_count(raw):
+        if not raw or "not found" in raw.lower():
+            return None
+
+        try:
+            payload = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            payload = None
+
+        def find_count(value):
+            if isinstance(value, bool):
+                return None
+
+            if isinstance(value, int) and value >= 0:
+                return value
+
+            if isinstance(value, dict):
+                preferred = (
+                    "value",
+                    "count",
+                    "online",
+                    "sessions",
+                    "sessionCount",
+                )
+
+                for key in preferred:
+                    if key in value:
+                        found = find_count(value[key])
+                        if found is not None:
+                            return found
+
+                for item in value.values():
+                    found = find_count(item)
+                    if found is not None:
+                        return found
+
+            if isinstance(value, list):
+                for item in value:
+                    found = find_count(item)
+                    if found is not None:
+                        return found
+
+            return None
+
+        found = find_count(payload)
+        if found is not None:
+            return found
+
+        match = re.search(
+            r'"(?:value|count|online|sessions|sessionCount)"'
+            r"\s*:\s*(\d+)",
+            raw,
+            re.IGNORECASE,
+        )
+        return int(match.group(1)) if match else None
+
+    def extract_ips(raw):
+        found = set()
+
+        if not raw:
+            return found
+
+        try:
+            payload = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            payload = raw
+
+        def inspect(value):
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    inspect(key)
+                    inspect(item)
+                return
+
+            if isinstance(value, list):
+                for item in value:
+                    inspect(item)
+                return
+
+            if not isinstance(value, str):
+                return
+
+            direct = valid_source_ip(value)
+            if direct:
+                found.add(direct)
+
+            for candidate in re.findall(
+                r"\[[0-9A-Fa-f:]+\]|(?:\d{1,3}\.){3}\d{1,3}",
+                value,
+            ):
+                address = valid_source_ip(candidate)
+                if address:
+                    found.add(address)
+
+        inspect(payload)
+        return found
+
+    all_online_raw = api_call("statsgetallonlineusers")
+    api_available = all_online_raw is not None
+    online_users = extract_emails(all_online_raw)
+
+    recent_users = {
+        email
+        for email, item in activity.items()
+        if item["last"] is not None and item["last"] >= cutoff
+    }
+
+    trackable_accounts = {}
+    for acc in accounts:
+        preset = PRESETS.get(acc.get("preset"), {})
+        protocol = preset.get("proto")
+        email = f"{acc.get('user')}@hamada"
+
+        if protocol in {"vless", "vmess", "trojan"}:
+            trackable_accounts[email] = acc
+
+    candidates = (online_users | recent_users) & set(trackable_accounts)
+    session_counts = {}
+    api_ips = {}
+
+    if api_available:
+        for email in sorted(candidates):
+            session_counts[email] = extract_session_count(
+                api_call("statsonline", email)
+            )
+            api_ips[email] = extract_ips(
+                api_call("statsonlineiplist", email)
+            )
+
+    connected = {}
+
+    for acc in accounts:
+        user = str(acc.get("user", ""))
+        preset = PRESETS.get(acc.get("preset"), {})
+        protocol = preset.get("proto", "")
+        email = f"{user}@hamada"
+
+        if not user or not is_active(acc):
+            continue
+
+        if protocol not in {"vless", "vmess", "trojan"}:
+            continue
+
+        item = activity.get(
+            email,
+            {"last": None, "active_ips": set()},
+        )
+
+        sessions = session_counts.get(email)
+        exact_online = (
+            email in online_users
+            or (sessions is not None and sessions > 0)
+            or bool(api_ips.get(email))
+        )
+
+        if not exact_online:
+            continue
+
+        if sessions is not None and sessions > 0:
+            connected_count = sessions
+        elif api_ips.get(email):
+            connected_count = len(api_ips[email])
+        elif item["active_ips"]:
+            connected_count = len(item["active_ips"])
+        else:
+            connected_count = 1
+
+        connected[user] = max(
+            connected.get(user, 0),
+            connected_count,
+        )
+
+    if not connected:
+        print("No connected users.")
+        return
+
+    user_width = max(
+        16,
+        max(len(user) for user in connected) + 2,
+    )
+
+    for user in sorted(connected, key=str.lower):
+        print(
+            f"{user:<{user_width}} "
+            f"{'ONLINE':<10} "
+            f"{connected[user]:>4}"
+        )
+
+def menu(_args):
+    while True:
+        _xray_header("HAMADA NET XRAY MANAGER")
+
+        _section("XRAY ACCOUNT SERVICES")
+        _menu_item("1", "Add account", "Create paid Xray account")
+        _menu_item("2", "Trial account", "Create 1-day test account")
+        _menu_item("3", "Renew account", "Extend account expiry")
+        _menu_item("4", "Delete account", "Remove account")
+        _menu_item("5", "Show account", "Open clean copy page")
+        _menu_item("6", "List accounts", "View all Xray users")
+        _menu_item("7", "Change account UUID", "For VLESS/VMess accounts")
+        _menu_item("8", "Change account password", "For Trojan/SS accounts")
+        _menu_item("9", "Restore deleted account", "Restore last deleted Xray users")
+        _menu_item("10", "Connected clients", "Show Xray recent client usage")
+
+        _section("SYSTEM")
+        _menu_item("11", "Restart Xray", "Rebuild and restart service")
+        _menu_item("0", "Exit", "Back to shell")
+
+        _line()
+        c = input("Choose: ").strip()
+
+        try:
+            if c == "1":
+                _xray_header("CREATE XRAY ACCOUNT")
+                add(argparse.Namespace(user=None, days=None, preset=None, target=None, listen_port=None))
+                _copy_wait()
+            elif c == "2":
+                _xray_header("CREATE TRIAL XRAY ACCOUNT")
+                trial(argparse.Namespace(user=None, preset=None, target=None, listen_port=None))
+                _copy_wait()
+            elif c == "3":
+                _xray_header("RENEW XRAY ACCOUNT")
+                renew(argparse.Namespace(user=input("Username: ").strip(), days=int(input("Days: ").strip() or "30")))
+                _pause()
+            elif c == "4":
+                delete(argparse.Namespace(
+                    user=None,
+                    preset=None,
+                    port=None,
+                ))
+                _pause()
+            elif c == "5":
+                show(argparse.Namespace(
+                    user=None,
+                    preset=None,
+                    port=None,
+                ))
+            elif c == "6":
+                _xray_header("XRAY ACCOUNT LIST")
+                list_users(None)
+                _pause()
+            elif c == "7":
+                change_uuid_menu(None)
+                _copy_wait()
+            elif c == "8":
+                change_password_menu(None)
+                _copy_wait()
+            elif c == "9":
+                restore_deleted_xray_menu(None)
+                _copy_wait()
+            elif c == "10":
+                connected_clients_menu(None)
+                _pause()
+            elif c == "11":
+                _xray_header("RESTART XRAY")
+                restart(None)
+                _pause()
+            elif c == "0":
+                if sys.stdout.isatty():
+                    os.system("clear")
+                return
+            else:
+                print("Invalid option")
+                _pause()
+        except KeyboardInterrupt:
+            print()
+            _pause()
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="xrayctl")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("init"); p.add_argument("domain", nargs="?"); p.set_defaults(func=init)
+    p = sub.add_parser("presets"); p.set_defaults(func=presets)
+    p = sub.add_parser("add"); p.add_argument("user", nargs="?"); p.add_argument("days", nargs="?"); p.add_argument("preset", nargs="?"); p.add_argument("--target"); p.add_argument("--listen-port"); p.set_defaults(func=add)
+    p = sub.add_parser("trial"); p.add_argument("user", nargs="?"); p.add_argument("preset", nargs="?"); p.add_argument("--target"); p.add_argument("--listen-port"); p.set_defaults(func=trial)
+    p = sub.add_parser("renew"); p.add_argument("user"); p.add_argument("days", type=int); p.add_argument("--preset"); p.set_defaults(func=renew)
+    p = sub.add_parser("set-forward"); p.add_argument("user"); p.add_argument("preset"); p.add_argument("target"); p.set_defaults(func=set_forward)
+    p = sub.add_parser("clear-forward"); p.add_argument("user"); p.add_argument("preset"); p.set_defaults(func=clear_forward)
+    p = sub.add_parser("del"); p.add_argument("user", nargs="?"); p.add_argument("--preset"); p.add_argument("--port", type=int); p.set_defaults(func=delete)
+    p = sub.add_parser("show"); p.add_argument("user", nargs="?"); p.add_argument("--preset"); p.add_argument("--port", type=int); p.set_defaults(func=show)
+    p = sub.add_parser("list"); p.set_defaults(func=list_users)
+    p = sub.add_parser("build"); p.set_defaults(func=lambda _a: build(False))
+    p = sub.add_parser("restart"); p.set_defaults(func=restart)
+    p = sub.add_parser("status"); p.set_defaults(func=status)
+    p = sub.add_parser("doctor"); p.set_defaults(func=doctor)
+    p = sub.add_parser("change-uuid"); p.set_defaults(func=change_uuid_menu)
+    p = sub.add_parser("change-password"); p.set_defaults(func=change_password_menu)
+    p = sub.add_parser("restore-deleted"); p.set_defaults(func=restore_deleted_xray_menu)
+    p = sub.add_parser("connected-clients"); p.set_defaults(func=connected_clients_menu)
+    p = sub.add_parser("menu"); p.set_defaults(func=menu)
+
+    args = parser.parse_args()
+    args.func(args)
+
+if __name__ == "__main__":
+    main()

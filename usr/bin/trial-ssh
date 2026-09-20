@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+STORE="/etc/hamada/ssh-accounts"
+
+read -rp "Trial minutes: " MINUTES
+echo "$MINUTES" | grep -Eq '^[0-9]+$' || { echo "ERROR: minutes must be number"; exit 1; }
+[ "$MINUTES" -gt 0 ] || { echo "ERROR: minutes must be greater than 0"; exit 1; }
+
+user="trial$(openssl rand -hex 2)"
+pass="$(openssl rand -hex 4)"
+
+printf '%s\n%s\n1\n\n' "$user" "$pass" | add-ssh
+
+EXPIRE_TS="$(date -d "+${MINUTES} minutes" +%s)"
+EXPIRE_HUMAN="$(date -d "@${EXPIRE_TS}" '+%Y-%m-%d %H:%M:%S')"
+
+if [ -f "$STORE/${user}.conf" ]; then
+  {
+    echo "TRIAL_MINUTES='$MINUTES'"
+    echo "EXPIRE_TS='$EXPIRE_TS'"
+    echo "EXPIRE_HUMAN='$EXPIRE_HUMAN'"
+  } >> "$STORE/${user}.conf"
+fi
+
+systemd-run --quiet --unit="hamada-trial-ssh-${user}" --on-active="${MINUTES}m" \
+  bash -lc "pkill -u '$user' 2>/dev/null || true; userdel '$user' 2>/dev/null || true; rm -f '$STORE/${user}.conf'"
+
+echo "============================================"
+echo "Trial SSH account created"
+echo "Username : $user"
+echo "Password : $pass"
+echo "Minutes  : $MINUTES"
+echo "Expires  : $EXPIRE_HUMAN"
+echo "============================================"
+read -rp "Press Enter to continue..."
