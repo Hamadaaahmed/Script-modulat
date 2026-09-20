@@ -270,6 +270,44 @@ DROPBEAR
 }
 
 
+certificate_public_hash() {
+  openssl x509 \
+    -in "$1" \
+    -pubkey \
+    -noout 2>/dev/null |
+    openssl pkey \
+      -pubin \
+      -outform DER 2>/dev/null |
+    sha256sum |
+    awk '{print $1}'
+}
+
+private_key_public_hash() {
+  openssl pkey \
+    -in "$1" \
+    -pubout \
+    -outform DER 2>/dev/null |
+    sha256sum |
+    awk '{print $1}'
+}
+
+certificate_key_match() {
+  local crt="$1"
+  local key="$2"
+  local cert_hash
+  local key_hash
+
+  cert_hash="$(certificate_public_hash "$crt")" ||
+    return 1
+
+  key_hash="$(private_key_public_hash "$key")" ||
+    return 1
+
+  [ -n "$cert_hash" ] &&
+    [ "$cert_hash" = "$key_hash" ]
+}
+
+
 configure_certs() {
   local cert_dir="/etc/hamada/certs"
   local live_dir="/etc/letsencrypt/live/$DOMAIN"
@@ -280,43 +318,6 @@ configure_certs() {
   local is_sslip_domain=0
 
   mkdir -p "$cert_dir" /etc/letsencrypt/live
-
-  certificate_public_hash() {
-    openssl x509 \
-      -in "$1" \
-      -pubkey \
-      -noout 2>/dev/null |
-      openssl pkey \
-        -pubin \
-        -outform DER 2>/dev/null |
-      sha256sum |
-      awk '{print $1}'
-  }
-
-  private_key_public_hash() {
-    openssl pkey \
-      -in "$1" \
-      -pubout \
-      -outform DER 2>/dev/null |
-      sha256sum |
-      awk '{print $1}'
-  }
-
-  certificate_key_match() {
-    local crt="$1"
-    local key="$2"
-    local cert_hash
-    local key_hash
-
-    cert_hash="$(certificate_public_hash "$crt")" ||
-      return 1
-
-    key_hash="$(private_key_public_hash "$key")" ||
-      return 1
-
-    [ -n "$cert_hash" ] &&
-      [ "$cert_hash" = "$key_hash" ]
-  }
 
   certificate_usable_for_domain() {
     local crt="$1"
@@ -969,12 +970,6 @@ server {
         proxy_set_header Connection "Upgrade";
         proxy_set_header Host $host;
         proxy_read_timeout 86400;
-    }
-
-    location ^~ /.well-known/acme-challenge/ {
-        root /var/www/html;
-        default_type text/plain;
-        try_files $uri =404;
     }
 
     location / {
