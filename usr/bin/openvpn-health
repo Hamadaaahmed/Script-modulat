@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -u
+
+RUNTIME_ROOT="${HAMADA_HOME:-/opt/hamada}"
+CURRENT="$RUNTIME_ROOT/current"
+PYTHON_BIN="${HAMADA_PYTHON:-/usr/bin/python3}"
+
+if [ ! -x "$PYTHON_BIN" ] || [ ! -d "$CURRENT/hamada" ]; then
+    echo "ERROR: HAMADA OpenVPN Core unavailable." >&2
+    exit 20
+fi
+
+exec env PYTHONPATH="$CURRENT" \
+    "$PYTHON_BIN" -m hamada.runtime.cli \
+    openvpn-health --root "$RUNTIME_ROOT" "$@"

@@ -7,6 +7,19 @@ class IntegrationBoundaryTests(unittest.TestCase):
         self.assertLess(deploy,install)
     def test_bootstrap_has_idempotent_runtime_hook(self):
         self.assertIn('hamada-runtime-deploy deploy',(ROOT/'scripts/bootstrap-full-install.sh').read_text())
+
+    def test_openvpn_health_public_command_is_installable(self):
+        command = ROOT/'usr/bin/openvpn-health'
+        self.assertTrue(command.is_file())
+        self.assertIn(
+            'hamada.runtime.cli',
+            command.read_text(),
+        )
+        setup = (ROOT/'setup.sh').read_text()
+        self.assertIn(
+            'find usr/bin -maxdepth 1 -type f -print',
+            setup,
+        )
     def test_updater_deploys_core_before_command_loop_and_uses_runtime_rollback(self):
         s=(ROOT/'usr/bin/hamada-update').read_text(); deploy=s.index('hamada-runtime-deploy" deploy'); loop=s.index('while IFS= read -r name;',deploy)
         self.assertLess(deploy,loop)
