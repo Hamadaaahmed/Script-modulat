@@ -2,6 +2,7 @@ import argparse, os, sys
 from pathlib import Path
 from hamada.modules.ssh.accounts import SSHAccountService
 from hamada.modules.ssh.errors import SSHCoreError
+from hamada.modules.openvpn.health import OpenVPNHealthService
 from hamada.runtime.deployment import RuntimeDeployment, DeploymentError
 
 EXIT_OK=0; EXIT_USER=2; EXIT_RUNTIME=20; EXIT_SYSTEM=30; EXIT_PARTIAL=40
@@ -9,6 +10,26 @@ EXIT_OK=0; EXIT_USER=2; EXIT_RUNTIME=20; EXIT_SYSTEM=30; EXIT_PARTIAL=40
 def runtime_check(root: str) -> int:
     st=RuntimeDeployment(root).status()
     return EXIT_OK if st.healthy else EXIT_RUNTIME
+
+def openvpn_health() -> int:
+    items = OpenVPNHealthService().inspect()
+    passed = 0
+
+    for item in items:
+        if item.ok:
+            passed += 1
+        print("{} {} {}".format(
+            "PASS" if item.ok else "FAIL",
+            item.name,
+            item.detail,
+        ))
+
+    total = len(items)
+    print("summary={}/{} passed".format(passed, total))
+
+    if not items or passed != total:
+        return EXIT_RUNTIME
+    return EXIT_OK
 
 def _pause():
     try: input("Press Enter to continue...")
@@ -50,10 +71,11 @@ def ssh_renew() -> int:
 
 def main(argv=None) -> int:
     ap=argparse.ArgumentParser(prog="hamada-runtime")
-    ap.add_argument("command",choices=["runtime-check","runtime-status","ssh-renew"])
+    ap.add_argument("command",choices=["runtime-check","runtime-status","openvpn-health","ssh-renew"])
     ap.add_argument("--root",default=os.environ.get("HAMADA_HOME","/opt/hamada"))
     ns=ap.parse_args(argv)
     if ns.command=="runtime-check": return runtime_check(ns.root)
+    if ns.command=="openvpn-health": return openvpn_health()
     if ns.command=="runtime-status":
         st=RuntimeDeployment(ns.root).status(); print(f"root={st.root}"); print(f"active={st.active_version or '-'}"); print(f"previous={st.previous_version or '-'}"); print(f"healthy={'yes' if st.healthy else 'no'}"); return EXIT_OK if st.healthy else EXIT_RUNTIME
     return ssh_renew()
