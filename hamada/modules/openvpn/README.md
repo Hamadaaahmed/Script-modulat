@@ -1,6 +1,6 @@
-# OpenVPN Core Reference Module
+# OpenVPN Core Module
 
-Phase 3A introduces a read-only OpenVPN runtime model and inspection layer.
+Phase 3A introduced the read-only OpenVPN runtime model and inspection layer. Phase 3D added pure, deterministic client-profile rendering, and Phase 3F records that ownership boundary explicitly.
 
 ## Observed legacy contract
 
@@ -17,7 +17,10 @@ Phase 3A introduces a read-only OpenVPN runtime model and inspection layer.
 OpenVPN Core does not own Linux account creation, renewal or deletion. PAM
 consumes the existing Linux-account backend.
 
-Phase 3A also does not own or mutate:
+OpenVPN Core owns deterministic client-profile rendering as pure logic. It
+does not write or publish profile files. Profile filesystem writes and publication remain legacy-owned.
+
+OpenVPN Core still does not own or mutate:
 
 - iptables/firewall/NAT
 - Nginx or HAProxy

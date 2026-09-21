@@ -13,10 +13,8 @@ class OpenVPNPhase3ABoundaryTests(unittest.TestCase):
     def manifest(self):
         return json.loads(MANIFEST.read_text(encoding="utf-8"))
 
-    def test_manifest_is_phase3a_reference(self):
+    def test_read_only_runtime_inspection_remains_core_owned(self):
         manifest = self.manifest()
-        self.assertEqual(manifest["migration"]["status"], "reference")
-        self.assertEqual(manifest["migration"]["phase"], "3A")
         self.assertIn(
             "read-only runtime inspection",
             manifest["migration"]["core_ownership"],
@@ -64,6 +62,57 @@ class OpenVPNPhase3ABoundaryTests(unittest.TestCase):
     def test_firewall_remains_legacy_owned(self):
         manifest = self.manifest()
         self.assertEqual(manifest["firewall"]["ownership"], "legacy")
+
+    def test_phase3f_manifest_records_profile_rendering_core_ownership(self):
+        manifest = self.manifest()
+
+        self.assertEqual(
+            manifest["migration"]["status"],
+            "partial",
+        )
+        self.assertEqual(
+            manifest["migration"]["phase"],
+            "3F",
+        )
+        self.assertIn(
+            "deterministic client profile rendering (no filesystem writes)",
+            manifest["migration"]["core_ownership"],
+        )
+
+    def test_phase3f_profile_filesystem_publication_remains_legacy_owned(self):
+        manifest = self.manifest()
+        legacy = manifest["migration"]["legacy_ownership"]
+
+        self.assertIn(
+            "client profile filesystem writes and publication",
+            legacy,
+        )
+        self.assertNotIn(
+            "client profile generation",
+            legacy,
+        )
+
+    def test_phase3f_readme_documents_profile_rendering_boundary(self):
+        readme = (
+            ROOT
+            / "hamada"
+            / "modules"
+            / "openvpn"
+            / "README.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "deterministic client-profile rendering",
+            readme,
+        )
+        self.assertIn(
+            "does not write or publish profile files",
+            readme,
+        )
+        self.assertIn(
+            "filesystem writes and publication remain legacy-owned",
+            readme,
+        )
 
     def test_manifest_passes_foundation_validation(self):
         findings = validate_manifest(self.manifest(), "openvpn.json")

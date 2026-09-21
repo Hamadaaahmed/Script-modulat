@@ -2,8 +2,8 @@
   "schema_version": 1,
   "id": "openvpn",
   "name": "OpenVPN",
-  "version": "phase3a-reference-1",
-  "description": "OpenVPN TCP, UDP and WebSocket runtime with Phase 3A read-only Core inspection.",
+  "version": "phase3f-profile-rendering-1",
+  "description": "OpenVPN TCP, UDP and WebSocket runtime with read-only Core inspection and deterministic client profile rendering.",
   "dependencies": {
     "modules": [
       "edge"
@@ -108,13 +108,14 @@
     "reconcile"
   ],
   "migration": {
-    "status": "reference",
-    "phase": "3A",
+    "status": "partial",
+    "phase": "3F",
     "core_ownership": [
       "read-only OpenVPN configuration parsing",
       "read-only runtime inspection",
       "read-only health reporting",
-      "observed runtime contract"
+      "observed runtime contract",
+      "deterministic client profile rendering (no filesystem writes)"
     ],
     "legacy_ownership": [
       "OpenVPN installation",
@@ -122,7 +123,7 @@
       "server configuration writes",
       "systemd service lifecycle",
       "WebSocket bridge configuration",
-      "client profile generation",
+      "client profile filesystem writes and publication",
       "NAT and forwarding rules",
       "Nginx and HAProxy routing"
     ],
