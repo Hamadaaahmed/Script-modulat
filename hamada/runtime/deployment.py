@@ -6,6 +6,9 @@ from typing import Dict, Optional, Union
 REQUIRED = (
     "hamada/__init__.py", "hamada/VERSION", "hamada/modules/ssh/accounts.py",
     "hamada/modules/ssh/metadata.py", "hamada/modules/ssh/system.py",
+    "hamada/modules/openvpn/__init__.py", "hamada/modules/openvpn/model.py",
+    "hamada/modules/openvpn/config.py", "hamada/modules/openvpn/system.py",
+    "hamada/modules/openvpn/health.py",
     "hamada/runtime/__init__.py", "hamada/runtime/cli.py", "hamada/runtime/deployment.py",
     "legacy/renew-ssh",
 )
@@ -56,7 +59,7 @@ class RuntimeDeployment:
     @staticmethod
     def _source_runtime_files(source):
         files = [source / "hamada/__init__.py", source / "hamada/VERSION", source / "legacy/usr/bin/renew-ssh"]
-        for rel in ("hamada/modules/ssh", "hamada/runtime"):
+        for rel in ("hamada/modules/ssh", "hamada/modules/openvpn", "hamada/runtime"):
             files.extend(p for p in (source / rel).rglob("*") if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc")
         return sorted(set(files))
 
@@ -108,7 +111,7 @@ class RuntimeDeployment:
             except (OSError, SyntaxError) as exc: raise DeploymentError(f"python validation failed: {py.name}") from exc
         # Import without relying on the source checkout.
         import subprocess, sys
-        cp = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, %r); import hamada.modules.ssh.accounts, hamada.runtime.cli" % str(release)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        cp = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, %r); import hamada.modules.ssh.accounts, hamada.modules.openvpn.model, hamada.modules.openvpn.config, hamada.modules.openvpn.system, hamada.modules.openvpn.health, hamada.runtime.cli" % str(release)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
         if cp.returncode != 0: raise DeploymentError("runtime import validation failed: " + cp.stderr.strip())
         manifest = release / "release.json"
         if manifest.is_file():
@@ -230,11 +233,14 @@ class RuntimeDeployment:
                 staging = Path(tempfile.mkdtemp(prefix=f".{version}.staging.", dir=self.releases))
                 try:
                     (staging / "hamada/modules/ssh").mkdir(parents=True)
+                    (staging / "hamada/modules/openvpn").mkdir(parents=True)
                     (staging / "hamada/runtime").mkdir(parents=True)
                     shutil.copy2(source / "hamada/__init__.py", staging / "hamada/__init__.py")
                     shutil.copy2(source / "hamada/VERSION", staging / "hamada/VERSION")
                     for src_file in (source / "hamada/modules/ssh").glob("*.py"):
                         shutil.copy2(src_file, staging / "hamada/modules/ssh" / src_file.name)
+                    for src_file in (source / "hamada/modules/openvpn").glob("*.py"):
+                        shutil.copy2(src_file, staging / "hamada/modules/openvpn" / src_file.name)
                     for src_file in (source / "hamada/runtime").glob("*.py"):
                         shutil.copy2(src_file, staging / "hamada/runtime" / src_file.name)
                     legacy_src = source / "legacy/usr/bin/renew-ssh"

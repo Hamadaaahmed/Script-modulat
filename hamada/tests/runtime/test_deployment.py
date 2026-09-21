@@ -294,3 +294,125 @@ class DeploymentTests(unittest.TestCase):
                     d.deploy(b)
             self.assertEqual(d.active_version(),va)
             self.assertFalse(d.status().healthy)
+
+class OpenVPNRuntimePackagingTests(unittest.TestCase):
+    """Phase 3B contract: OpenVPN Core is part of the versioned Runtime release."""
+
+    def copy_source(self, td, version="2.5.1"):
+        src = Path(td) / "src"
+        src.mkdir(parents=True)
+        shutil.copytree(
+            PROJECT / "hamada",
+            src / "hamada",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+        (src / "hamada/VERSION").write_text(version + "\n")
+        (src / "legacy/usr/bin").mkdir(parents=True)
+        shutil.copy2(
+            PROJECT / "legacy/usr/bin/renew-ssh",
+            src / "legacy/usr/bin/renew-ssh",
+        )
+        return src
+
+    def test_release_identity_includes_openvpn_core_content(self):
+        with tempfile.TemporaryDirectory() as td:
+            a = self.copy_source(Path(td) / "a", "2.5.2-openvpn")
+            b = self.copy_source(Path(td) / "b", "2.5.2-openvpn")
+
+            target = b / "hamada/modules/openvpn/model.py"
+            target.write_text(
+                target.read_text(encoding="utf-8") + "\n# release identity marker\n",
+                encoding="utf-8",
+            )
+
+            self.assertNotEqual(
+                RuntimeDeployment.source_version(a),
+                RuntimeDeployment.source_version(b),
+            )
+
+    def test_deploy_packages_openvpn_core(self):
+        with tempfile.TemporaryDirectory() as td:
+            src = self.copy_source(td)
+            root = Path(td) / "runtime"
+            deployment = RuntimeDeployment(root)
+
+            deployment.deploy(src)
+            active = deployment.active_release()
+
+            self.assertIsNotNone(active)
+            self.assertTrue(
+                (active / "hamada/modules/openvpn/model.py").is_file()
+            )
+            self.assertTrue(
+                (active / "hamada/modules/openvpn/config.py").is_file()
+            )
+            self.assertTrue(
+                (active / "hamada/modules/openvpn/system.py").is_file()
+            )
+            self.assertTrue(
+                (active / "hamada/modules/openvpn/health.py").is_file()
+            )
+
+    def test_openvpn_runtime_independent_from_source_checkout(self):
+        with tempfile.TemporaryDirectory() as td:
+            src = self.copy_source(td)
+            root = Path(td) / "runtime"
+            deployment = RuntimeDeployment(root)
+
+            deployment.deploy(src)
+            active = deployment.active_release()
+            self.assertIsNotNone(active)
+
+            shutil.rmtree(src)
+
+            import subprocess
+            import sys
+
+            code = (
+                "import sys;"
+                "sys.path.insert(0,{!r});"
+                "from hamada.modules.openvpn.model import OpenVPNContract;"
+                "from hamada.modules.openvpn.health import OpenVPNHealthService;"
+                "c=OpenVPNContract();"
+                "print(c.tcp_port,c.udp_port,c.websocket_port)"
+            ).format(str(active))
+
+            cp = subprocess.run(
+                [sys.executable, "-I", "-c", code],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+            )
+
+            self.assertEqual(cp.returncode, 0, cp.stderr)
+            self.assertEqual(cp.stdout.strip(), "1194 2200 10082")
+            self.assertTrue(deployment.status().healthy)
+
+    def test_missing_required_openvpn_runtime_file_rejected_before_activation(self):
+        with tempfile.TemporaryDirectory() as td:
+            src = self.copy_source(td)
+            (src / "hamada/modules/openvpn/model.py").unlink()
+
+            root = Path(td) / "runtime"
+            deployment = RuntimeDeployment(root)
+
+            with self.assertRaises(DeploymentError):
+                deployment.deploy(src)
+
+            self.assertIsNone(deployment.active_version())
+
+    def test_openvpn_checksum_corruption_detected(self):
+        with tempfile.TemporaryDirectory() as td:
+            src = self.copy_source(td)
+            root = Path(td) / "runtime"
+            deployment = RuntimeDeployment(root)
+
+            deployment.deploy(src)
+            active = deployment.active_release()
+            self.assertIsNotNone(active)
+
+            target = active / "hamada/modules/openvpn/model.py"
+            with target.open("a", encoding="utf-8") as handle:
+                handle.write("\n# corrupt\n")
+
+            self.assertFalse(deployment.status().healthy)
