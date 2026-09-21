@@ -1076,9 +1076,50 @@ EOFUDP
   sysctl -w net.ipv4.ip_forward=1 >/dev/null
   grep -q '^net.ipv4.ip_forward=1' /etc/sysctl.conf || echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
 
-  iface="$(ip route | awk '/default/ {print $5; exit}')"
-  iptables -t nat -C POSTROUTING -s 10.8.0.0/24 -o "$iface" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o "$iface" -j MASQUERADE
-  iptables -t nat -C POSTROUTING -s 10.9.0.0/24 -o "$iface" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.9.0.0/24 -o "$iface" -j MASQUERADE
+  cat > /usr/local/sbin/hamada-openvpn-firewall <<'EOFOVPNFW'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+IFACE="$(
+  ip -4 route show default |
+    awk 'NR == 1 {print $5}'
+)"
+
+[ -n "$IFACE" ] || {
+  echo '[ERROR] OpenVPN WAN interface not found.' >&2
+  exit 1
+}
+
+sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+
+for NET in 10.8.0.0/24 10.9.0.0/24; do
+  iptables -t nat -C POSTROUTING \
+    -s "$NET" -o "$IFACE" -j MASQUERADE 2>/dev/null ||
+  iptables -t nat -A POSTROUTING \
+    -s "$NET" -o "$IFACE" -j MASQUERADE
+done
+EOFOVPNFW
+
+  chmod 0755 /usr/local/sbin/hamada-openvpn-firewall
+
+  cat > /etc/systemd/system/hamada-openvpn-firewall.service <<'EOFOVPNFWSVC'
+[Unit]
+Description=HAMADA NET OpenVPN firewall rules
+After=network-online.target
+Wants=network-online.target
+Before=openvpn-server@server-tcp-1194.service openvpn-server@server-udp-2200.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hamada-openvpn-firewall
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOFOVPNFWSVC
+
+  systemctl daemon-reload
+  systemctl enable --now hamada-openvpn-firewall.service
 
   ca="$(cat /etc/openvpn/server/ca.crt)"
 

@@ -77,9 +77,14 @@ class OpenVPNLegacyCharacterizationTests(unittest.TestCase):
             source,
             [
                 "net.ipv4.ip_forward=1",
-                "-s 10.8.0.0/24",
-                "-s 10.9.0.0/24",
-                "-j MASQUERADE",
+                "for NET in 10.8.0.0/24 10.9.0.0/24; do",
+                'iptables -t nat -C POSTROUTING',
+                'iptables -t nat -A POSTROUTING',
+                '-s "$NET" -o "$IFACE" -j MASQUERADE',
+                "/usr/local/sbin/hamada-openvpn-firewall",
+                "hamada-openvpn-firewall.service",
+                "RemainAfterExit=yes",
+                "systemctl enable --now hamada-openvpn-firewall.service",
             ],
         )
 
