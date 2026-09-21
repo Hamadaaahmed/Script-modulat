@@ -2,13 +2,15 @@
   "schema_version": 1,
   "id": "openvpn",
   "name": "OpenVPN",
-  "version": "legacy-observed-1",
-  "description": "OpenVPN TCP, UDP and WebSocket legacy runtime.",
+  "version": "phase3a-reference-1",
+  "description": "OpenVPN TCP, UDP and WebSocket runtime with Phase 3A read-only Core inspection.",
   "dependencies": {
     "modules": [
       "edge"
     ],
-    "optional_modules": [],
+    "optional_modules": [
+      "ssh"
+    ],
     "infrastructure": []
   },
   "conflicts": {
@@ -30,7 +32,9 @@
       "/etc/openvpn/server/server-tcp-1194.conf",
       "/etc/openvpn/server/server-udp-2200.conf"
     ],
-    "data": [],
+    "data": [
+      "/var/www/html/vpn-files"
+    ],
     "legacy": []
   },
   "services": [
@@ -80,21 +84,51 @@
     "backends": []
   },
   "accounts": {
-    "supported": false,
-    "backend": null,
-    "capabilities": []
+    "supported": true,
+    "backend": "linux-pam-external",
+    "capabilities": [
+      "authenticate-existing-linux-account"
+    ]
   },
-  "healthchecks": [],
+  "healthchecks": [
+    "openvpn-binary",
+    "server-configs",
+    "pki-files",
+    "pam-plugin",
+    "systemd-services",
+    "client-profiles",
+    "tcp-1194-listener",
+    "udp-2200-listener",
+    "websocket-10082-listener"
+  ],
   "lifecycle": [
     "preflight",
-    "install",
-    "configure",
     "validate",
-    "enable",
-    "start",
     "verify",
-    "reconcile",
-    "migrate",
-    "uninstall"
-  ]
+    "reconcile"
+  ],
+  "migration": {
+    "status": "reference",
+    "phase": "3A",
+    "core_ownership": [
+      "read-only OpenVPN configuration parsing",
+      "read-only runtime inspection",
+      "read-only health reporting",
+      "observed runtime contract"
+    ],
+    "legacy_ownership": [
+      "OpenVPN installation",
+      "PKI generation",
+      "server configuration writes",
+      "systemd service lifecycle",
+      "WebSocket bridge configuration",
+      "client profile generation",
+      "NAT and forwarding rules",
+      "Nginx and HAProxy routing"
+    ],
+    "external_ownership": [
+      "Linux account lifecycle",
+      "PAM account backend"
+    ]
+  }
 }

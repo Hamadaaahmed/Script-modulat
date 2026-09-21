@@ -18,4 +18,4 @@ class IntegrationBoundaryTests(unittest.TestCase):
         # Phase 2.5 uses the existing optional migration.status=partial schema.
         s=(ROOT/'hamada/schemas/module.schema.json').read_text(); self.assertIn('"partial"',s)
     def test_out_of_scope_module_source_not_added(self):
-        modules=ROOT/'hamada/modules'; self.assertEqual(sorted(p.name for p in modules.iterdir() if p.is_dir() and p.name!='__pycache__'),['ssh'])
+        modules=ROOT/'hamada/modules'; self.assertEqual(sorted(p.name for p in modules.iterdir() if p.is_dir() and p.name!='__pycache__'),['openvpn','ssh'])
