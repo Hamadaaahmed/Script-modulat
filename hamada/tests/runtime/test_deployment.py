@@ -416,3 +416,152 @@ class OpenVPNRuntimePackagingTests(unittest.TestCase):
                 handle.write("\n# corrupt\n")
 
             self.assertFalse(deployment.status().healthy)
+
+    def test_phase3e_deploy_packages_profile_renderer(self):
+        with tempfile.TemporaryDirectory() as td:
+            src = self.copy_source(td)
+            root = Path(td) / "runtime"
+            deployment = RuntimeDeployment(root)
+
+            deployment.deploy(src)
+            active = deployment.active_release()
+
+            self.assertIsNotNone(active)
+            self.assertTrue(
+                (
+                    active
+                    / "hamada/modules/openvpn/profiles.py"
+                ).is_file()
+            )
+
+    def test_phase3e_profile_renderer_is_required_runtime_file(self):
+        from hamada.runtime import deployment as runtime_deployment
+
+        required = set(runtime_deployment.REQUIRED)
+
+        self.assertIn(
+            "hamada/modules/openvpn/profiles.py",
+            required,
+        )
+
+    def test_phase3e_missing_profile_renderer_rejected_before_activation(self):
+        with tempfile.TemporaryDirectory() as td:
+            src = self.copy_source(td)
+
+            (
+                src
+                / "hamada/modules/openvpn/profiles.py"
+            ).unlink()
+
+            root = Path(td) / "runtime"
+            deployment = RuntimeDeployment(root)
+
+            with self.assertRaisesRegex(
+                DeploymentError,
+                "required runtime file missing",
+            ):
+                deployment.deploy(src)
+
+            self.assertIsNone(deployment.active_version())
+
+    def test_phase3e_profile_renderer_changes_release_identity(self):
+        with tempfile.TemporaryDirectory() as td:
+            a = self.copy_source(
+                Path(td) / "a",
+                "2.5.2-openvpn-profiles",
+            )
+            b = self.copy_source(
+                Path(td) / "b",
+                "2.5.2-openvpn-profiles",
+            )
+
+            target = (
+                b
+                / "hamada/modules/openvpn/profiles.py"
+            )
+
+            target.write_text(
+                target.read_text(encoding="utf-8")
+                + "\n# phase3e identity marker\n",
+                encoding="utf-8",
+            )
+
+            self.assertNotEqual(
+                RuntimeDeployment.source_version(a),
+                RuntimeDeployment.source_version(b),
+            )
+
+    def test_phase3e_profile_renderer_survives_source_checkout_removal(self):
+        with tempfile.TemporaryDirectory() as td:
+            src = self.copy_source(td)
+            root = Path(td) / "runtime"
+            deployment = RuntimeDeployment(root)
+
+            deployment.deploy(src)
+            active = deployment.active_release()
+
+            self.assertIsNotNone(active)
+
+            shutil.rmtree(src)
+
+            import subprocess
+            import sys
+
+            code = (
+                "import sys;"
+                "sys.path.insert(0,{!r});"
+                "from hamada.modules.openvpn.profiles "
+                "import OpenVPNProfileRenderer;"
+                "r=OpenVPNProfileRenderer("
+                "'vpn.example.test','TEST-CA');"
+                "print("
+                "[line for line in r.tcp().splitlines() "
+                "if line.startswith('remote ')][0]"
+                ")"
+            ).format(str(active))
+
+            cp = subprocess.run(
+                [sys.executable, "-I", "-c", code],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+            )
+
+            self.assertEqual(
+                cp.returncode,
+                0,
+                cp.stderr,
+            )
+            self.assertEqual(
+                cp.stdout.strip(),
+                "remote vpn.example.test 1194",
+            )
+            self.assertTrue(deployment.status().healthy)
+
+    def test_phase3e_profile_renderer_checksum_corruption_detected(self):
+        with tempfile.TemporaryDirectory() as td:
+            src = self.copy_source(td)
+            root = Path(td) / "runtime"
+            deployment = RuntimeDeployment(root)
+
+            deployment.deploy(src)
+            active = deployment.active_release()
+
+            self.assertIsNotNone(active)
+
+            target = (
+                active
+                / "hamada/modules/openvpn/profiles.py"
+            )
+
+            with target.open(
+                "a",
+                encoding="utf-8",
+            ) as handle:
+                handle.write(
+                    "\n# phase3e corruption\n"
+                )
+
+            self.assertFalse(
+                deployment.status().healthy
+            )

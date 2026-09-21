@@ -8,7 +8,7 @@ REQUIRED = (
     "hamada/modules/ssh/metadata.py", "hamada/modules/ssh/system.py",
     "hamada/modules/openvpn/__init__.py", "hamada/modules/openvpn/model.py",
     "hamada/modules/openvpn/config.py", "hamada/modules/openvpn/system.py",
-    "hamada/modules/openvpn/health.py",
+    "hamada/modules/openvpn/health.py", "hamada/modules/openvpn/profiles.py",
     "hamada/runtime/__init__.py", "hamada/runtime/cli.py", "hamada/runtime/deployment.py",
     "legacy/renew-ssh",
 )
@@ -111,7 +111,7 @@ class RuntimeDeployment:
             except (OSError, SyntaxError) as exc: raise DeploymentError(f"python validation failed: {py.name}") from exc
         # Import without relying on the source checkout.
         import subprocess, sys
-        cp = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, %r); import hamada.modules.ssh.accounts, hamada.modules.openvpn.model, hamada.modules.openvpn.config, hamada.modules.openvpn.system, hamada.modules.openvpn.health, hamada.runtime.cli" % str(release)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        cp = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, %r); import hamada.modules.ssh.accounts, hamada.modules.openvpn.model, hamada.modules.openvpn.config, hamada.modules.openvpn.system, hamada.modules.openvpn.health, hamada.modules.openvpn.profiles, hamada.runtime.cli" % str(release)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
         if cp.returncode != 0: raise DeploymentError("runtime import validation failed: " + cp.stderr.strip())
         manifest = release / "release.json"
         if manifest.is_file():
